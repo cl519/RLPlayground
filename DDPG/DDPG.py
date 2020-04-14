@@ -5,6 +5,7 @@ from collections import deque
 from keras.models import Sequential
 from keras.layers import Dense
 from keras.optimizers import Adam
+import os
 
 import torch
 import torch.nn as nn
@@ -43,8 +44,9 @@ class OUNoise(object):
         self.state = x + dx
         return self.state
 
-    def get_action(self, action, t=0):
+    def get_action(self, action, t, j):
         ou_state = self.evolve_state()
+        #writer.add_scalar('ou_noise/train', ou_state, j * 25000 + t)
         self.sigma = self.max_sigma - (self.max_sigma - self.min_sigma) * min(1.0, t / self.decay_period)
         return np.clip(action + ou_state, self.low, self.high)
 
@@ -146,7 +148,7 @@ class DDPGAgent:
 
         #obs = Variable(torch.from_numpy(obs).float().unsqueeze(0))
         action = self.actor.forward(obs)
-        print("action actor returns: ", action)
+        #print("action actor returns: ", action)
         #action = action.detach().numpy()[0,0]
         # print('---------act--------')
         # print('action shape before detach: ', action.shape)
@@ -154,7 +156,7 @@ class DDPGAgent:
         # print('---------act--------')
 
         action = action.detach().numpy()[0] #TODO???
-        print("action after detach numpy and[0]: ", action)
+        #print("action after detach numpy and[0]: ", action)
         return action
 
     def update(self, rollouts, train_iter):
@@ -175,7 +177,7 @@ class DDPGAgent:
             critic_loss.backward()
             self.critic_optimizer.step()
 
-            writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
+            #writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
 
             #Policy Loss
             policy_loss = -self.critic(prev_obs_batch, self.actor(prev_obs_batch)).mean()
@@ -183,7 +185,7 @@ class DDPGAgent:
             policy_loss.backward()
             self.actor_optimizer.step()
 
-            writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
+            #writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
             for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
                 target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
@@ -214,7 +216,7 @@ def train():
 
 
 
-
+    #env = gym.make('HalfCheetah-v2')
     env = gym.make('MountainCarContinuous-v0')
     obs_size = env.observation_space.shape[0]
     num_actions = env.action_space.shape[0]
@@ -229,21 +231,24 @@ def train():
     env.seed(123)
     random.seed(123)
 
-    for j in range(50): #num of training iterations
+    for j in range(0): #num of training iterations 50
         done = False;
         prev_obs = env.reset()
         prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
         eps_reward = 0.
         run = 0
         print("j: ", j)
-        for step in range(25000):
+        for step in range(20): #25000
             if done:
                 # Store episode statistics
                 # avg_eps_reward.update(eps_reward)
                 # if 'success' in info:
                 #     avg_success_rate.update(int(info['success']))
                 #print ("Run: " + str(run) + ", score: " + str(eps_reward))
-                writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, j * 25000 + step)
+
+
+                # writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, j * 25000 + step)
+
                 run+=1
 
 
@@ -253,11 +258,11 @@ def train():
                 eps_reward = 0.
             else:
                 obs = prev_obs
-
+            env.render()
             action = policy.act(obs)
-            action = noise.get_action(action, step)
-            print("action shape: ", action.shape)
-            print("action: ", action)
+            action = noise.get_action(action, step, j)
+            #print("action shape: ", action.shape)
+            #print("action: ", action)
             #learn to debug ipdb
             obs, reward, done, info = env.step(action) #action.item()
             #print('obs type: ', type(obs))
@@ -274,6 +279,26 @@ def train():
         policy.update(rollouts, j)
 
 
+    if not os.path.isdir('model'):
+        os.makedirs('model')
+    print('ACTOR')
+    for param_tensor in policy.actor.state_dict():
+        print(param_tensor, "\t", policy.actor.state_dict()[param_tensor].size())
+    print('ACTOR_TARGET')
+    for param_tensor in policy.actor_target.state_dict():
+        print(param_tensor, "\t", policy.actor_target.state_dict()[param_tensor].size())
+    print('CRITIC')
+    for param_tensor in policy.critic.state_dict():
+        print(param_tensor, "\t", policy.critic.state_dict()[param_tensor].size())
+    print('CRITIC_TARGET')
+    for param_tensor in policy.actor.state_dict():
+        print(param_tensor, "\t", policy.critic_target.state_dict()[param_tensor].size())
+
+
+    torch.save(policy.actor.state_dict(), 'model/actor_param')
+    torch.save(policy.actor_target.state_dict(), 'model/actor_target_param')
+    torch.save(policy.critic.state_dict(), 'model/critic_param')
+    torch.save(policy.critic_target.state_dict(), 'model/critic_target_param')
     #
     #
     # observation_space = env.observation_space.shape[0]
@@ -294,11 +319,66 @@ def train():
     #         if terminal:
     #             break
 
+def eval():
+    env = gym.make('MountainCarContinuous-v0')
+    obs_size = env.observation_space.shape[0]
+    num_actions = env.action_space.shape[0]
 
+    model = DDPGAgent(obs_size, num_actions)
+    #model.load.state_dict(torch.load(PATH))
+    hidden_dim = 128
+
+    model.actor = ActorNetwork(obs_size, num_actions, hidden_dim)
+    model.actor_target = ActorNetwork(obs_size, num_actions, hidden_dim)
+    model.critic = CriticNetwork(obs_size + num_actions, num_actions, hidden_dim)
+    model.critic_target = CriticNetwork(obs_size + num_actions, num_actions, hidden_dim)
+
+    # print("Model's state_dict:")
+    # for param_tensor in policy.actor.state_dict():
+    #     print(param_tensor, "\t", policy.actor.state_dict()[param_tensor].size())
+
+    model.actor.load_state_dict(torch.load('model/actor_param'))
+    model.actor_target.load_state_dict(torch.load('model/actor_target_param'))
+    model.critic.load_state_dict(torch.load('model/critic_param'))
+    model.critic_target.load_state_dict(torch.load('model/critic_target_param'))
+
+    np.random.seed(123)
+    torch.manual_seed(123)
+    env.seed(123)
+    random.seed(123)
+
+    # for j in range(0): #num of training iterations 50
+    done = False;
+    prev_obs = env.reset()
+    prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
+    # run = 0
+    for step in range(25000): #25000
+        if done:
+            # avg_eps_reward.update(eps_reward)
+            # writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, j * 25000 + step)
+            # run+=1
+            # Reset Environment
+            obs = env.reset()
+            obs = torch.tensor(obs, dtype=torch.float32)
+            #eps_reward = 0.
+        else:
+            obs = prev_obs
+        env.render()
+        action = model.act(obs)
+        action = np.clip(action, env.action_space.low, env.action_space.high)
+        obs, reward, done, info = env.step(action) #action.item()
+
+        done = torch.tensor(done, dtype=torch.float32)
+        reward = torch.tensor(reward, dtype=torch.float32)
+        reward = reward
+        #rollouts.insert((step, done, action, reward, prev_obs.numpy(), obs)) #obs is numpy array
+
+        #prev_obs = torch.tensor(obs, dtype=torch.float32)
+        #eps_reward += reward
 
 
 
 
 if __name__ == "__main__":
-    train()
+    eval()
 
