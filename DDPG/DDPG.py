@@ -17,7 +17,7 @@ import collections
 from torch.autograd import Variable
 
 from torch.utils.tensorboard import SummaryWriter
-writer = SummaryWriter('runs/mountaincar')
+writer = SummaryWriter()
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 
@@ -85,38 +85,42 @@ class ActorNetwork(nn.Module):
         super().__init__()
         self.num_actions = num_actions
         self.fc = nn.Sequential(
-            nn.Linear(num_inputs, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, num_actions)
+            nn.Linear(num_inputs, 400),
+            nn.ReLU(),
+            nn.Linear(400, 300),
+            nn.ReLU(),
+            nn.Linear(300, num_actions)
         )
 
     def forward(self, state):
-        return self.fc(state)
+        return F.tanh(self.fc(state))
 
 class CriticNetwork(nn.Module):
     def __init__(self, num_inputs, num_actions, hidden_dim):
         super().__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(num_inputs, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, num_actions)
+        self.fc1 = nn.Sequential(
+            nn.Linear(num_inputs, 400),
+            nn.ReLU(),
+        )
+        self.fc2 = nn.Sequential(
+            nn.Linear(400 + num_actions, 300),
+            nn.ReLU(),
+            nn.Linear(300, num_actions)
         )
 
     def forward(self, state, action):
         #print('state.shape ', state.shape)
         #print('action.shape ', action.shape)
-        x = torch.cat([state, action], 1)
-
+        #x = torch.cat([state, action], 1)
+        x = self.fc1(state)
+        #print(x.shape)
+        #print(torch.cat([x, action], 1).shape)
         #print('x.shape ', x.shape)
-        return self.fc(x)
+        return self.fc2(torch.cat([x, action], 1))
 
 class DDPGAgent:
-    def __init__(self, num_inputs, num_actions, hidden_dim = 128, learning_rate = 1e-3, batch_size = 200, policy_epochs = 8,
-                 entropy_coef=0.001, gamma=0.99, tau = 0.01):
+    def __init__(self, num_inputs, num_actions, hidden_dim = 128, batch_size = 64, policy_epochs = 8,
+                 entropy_coef=0.001, gamma=0.99, tau = 0.001):
         #super().__init__(num_inputs, num_actions, hidden_dim, learning_rate, batch_size, policy_epochs, entropy_coef)
         self.policy_epochs = policy_epochs
         self.batch_size = batch_size
@@ -124,8 +128,8 @@ class DDPGAgent:
         self.actor = ActorNetwork(num_inputs, num_actions, hidden_dim)
         self.actor_target = ActorNetwork(num_inputs, num_actions, hidden_dim)
 
-        self.critic = CriticNetwork(num_inputs + num_actions, num_actions, hidden_dim)
-        self.critic_target = CriticNetwork(num_inputs + num_actions, num_actions, hidden_dim)
+        self.critic = CriticNetwork(num_inputs, num_actions, hidden_dim)
+        self.critic_target = CriticNetwork(num_inputs, num_actions, hidden_dim)
         self.critic_criterion = nn.MSELoss()
 
         self.gamma = gamma
@@ -137,8 +141,8 @@ class DDPGAgent:
         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=learning_rate)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=learning_rate)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3, weight_decay=0.01)
 
     def act(self, obs):
         # state = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
@@ -170,6 +174,8 @@ class DDPGAgent:
             QValue = self.critic(prev_obs_batch, actions_batch)
             next_actions_batch = self.actor_target(obs_batch)
             Next_QValue = self.critic_target(obs_batch, next_actions_batch.detach())
+            #print('returns_batch before unsqeeze: ', returns_batch.shape)
+            #print('returns_batch after unsqqeze: ', returns_batch.unsqueeze((1)).shape)
             QValPrime = returns_batch.unsqueeze(1) + self.gamma * Next_QValue #Added unsqueeze in order to broadcast
 
             critic_loss = self.critic_criterion(QValue, QValPrime.detach())
@@ -177,7 +183,7 @@ class DDPGAgent:
             critic_loss.backward()
             self.critic_optimizer.step()
 
-            #writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
+            writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
 
             #Policy Loss
             policy_loss = -self.critic(prev_obs_batch, self.actor(prev_obs_batch)).mean()
@@ -185,7 +191,7 @@ class DDPGAgent:
             policy_loss.backward()
             self.actor_optimizer.step()
 
-            #writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
+            writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
             for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
                 target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
@@ -231,14 +237,14 @@ def train():
     env.seed(123)
     random.seed(123)
 
-    for j in range(0): #num of training iterations 50
+    for j in range(50): #num of training iterations 50
         done = False;
         prev_obs = env.reset()
         prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
         eps_reward = 0.
         run = 0
         print("j: ", j)
-        for step in range(20): #25000
+        for step in range(25000): #25000
             if done:
                 # Store episode statistics
                 # avg_eps_reward.update(eps_reward)
@@ -247,7 +253,7 @@ def train():
                 #print ("Run: " + str(run) + ", score: " + str(eps_reward))
 
 
-                # writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, j * 25000 + step)
+                writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, j * 25000 + step)
 
                 run+=1
 
@@ -295,10 +301,10 @@ def train():
         print(param_tensor, "\t", policy.critic_target.state_dict()[param_tensor].size())
 
 
-    torch.save(policy.actor.state_dict(), 'model/actor_param')
-    torch.save(policy.actor_target.state_dict(), 'model/actor_target_param')
-    torch.save(policy.critic.state_dict(), 'model/critic_param')
-    torch.save(policy.critic_target.state_dict(), 'model/critic_target_param')
+    # torch.save(policy.actor.state_dict(), 'model/actor_param')
+    # torch.save(policy.actor_target.state_dict(), 'model/actor_target_param')
+    # torch.save(policy.critic.state_dict(), 'model/critic_param')
+    # torch.save(policy.critic_target.state_dict(), 'model/critic_target_param')
     #
     #
     # observation_space = env.observation_space.shape[0]
@@ -330,8 +336,8 @@ def eval():
 
     model.actor = ActorNetwork(obs_size, num_actions, hidden_dim)
     model.actor_target = ActorNetwork(obs_size, num_actions, hidden_dim)
-    model.critic = CriticNetwork(obs_size + num_actions, num_actions, hidden_dim)
-    model.critic_target = CriticNetwork(obs_size + num_actions, num_actions, hidden_dim)
+    model.critic = CriticNetwork(obs_size, num_actions, hidden_dim)
+    model.critic_target = CriticNetwork(obs_size, num_actions, hidden_dim)
 
     # print("Model's state_dict:")
     # for param_tensor in policy.actor.state_dict():
@@ -355,7 +361,7 @@ def eval():
     for step in range(25000): #25000
         if done:
             # avg_eps_reward.update(eps_reward)
-            # writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, j * 25000 + step)
+            #writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, j * 25000 + step)
             # run+=1
             # Reset Environment
             obs = env.reset()
@@ -380,5 +386,5 @@ def eval():
 
 
 if __name__ == "__main__":
-    eval()
+    train()
 
