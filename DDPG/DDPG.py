@@ -20,10 +20,11 @@ from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter()
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
-
+#reset noise at the beginning of episode
+#num of episodes:
 
 class OUNoise(object):
-    def __init__(self, action_space, mu=0.0, theta=0.15, max_sigma=0.3, min_sigma=0.3, decay_period=100000):
+    def __init__(self, action_space, mu=0.0, theta=0.15, max_sigma=0.3, min_sigma=0.2, decay_period=100000):
         self.mu = mu
         self.theta = theta
         self.sigma = max_sigma
@@ -44,14 +45,14 @@ class OUNoise(object):
         self.state = x + dx
         return self.state
 
-    def get_action(self, action, t, j):
+    def get_action(self, action, t):
         ou_state = self.evolve_state()
         #writer.add_scalar('ou_noise/train', ou_state, j * 25000 + t)
         self.sigma = self.max_sigma - (self.max_sigma - self.min_sigma) * min(1.0, t / self.decay_period)
         return np.clip(action + ou_state, self.low, self.high)
 
 class RolloutStorage():
-    def __init__(self, obs_size, BUFFER_LIMIT = 1000000):
+    def __init__(self, obs_size, BUFFER_LIMIT = 8000): #used to be 1000000
         self.buffer = collections.deque(maxlen = BUFFER_LIMIT)
         self.obs_size = obs_size
 
@@ -164,40 +165,40 @@ class DDPGAgent:
         return action
 
     def update(self, rollouts, train_iter):
-        for epoch in range(self.policy_epochs):
-            data = rollouts.batch_sampler(self.batch_size, get_old_log_probs=False)
+        #for epoch in range(self.policy_epochs):
+        data = rollouts.batch_sampler(self.batch_size, get_old_log_probs=False)
 
 
-            _, _, actions_batch, returns_batch, prev_obs_batch, obs_batch = data
+        _, done_batch, actions_batch, returns_batch, prev_obs_batch, obs_batch = data
 
-            #Critic Loss
-            QValue = self.critic(prev_obs_batch, actions_batch)
-            next_actions_batch = self.actor_target(obs_batch)
-            Next_QValue = self.critic_target(obs_batch, next_actions_batch.detach())
-            #print('returns_batch before unsqeeze: ', returns_batch.shape)
-            #print('returns_batch after unsqqeze: ', returns_batch.unsqueeze((1)).shape)
-            QValPrime = returns_batch.unsqueeze(1) + self.gamma * Next_QValue #Added unsqueeze in order to broadcast
+        #Critic Loss
+        QValue = self.critic(prev_obs_batch, actions_batch)
+        next_actions_batch = self.actor_target(obs_batch)
+        Next_QValue = self.critic_target(obs_batch, next_actions_batch.detach())
+        #print('returns_batch before unsqeeze: ', returns_batch.shape)
+        #print('returns_batch after unsqqeze: ', returns_batch.unsqueeze((1)).shape)
+        QValPrime = returns_batch.unsqueeze(1) + (1-done_batch)*self.gamma * Next_QValue #Added unsqueeze in order to broadcast
 
-            critic_loss = self.critic_criterion(QValue, QValPrime.detach())
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-            self.critic_optimizer.step()
+        critic_loss = self.critic_criterion(QValue, QValPrime.detach())
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
 
-            writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
+        writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
 
-            #Policy Loss
-            policy_loss = -self.critic(prev_obs_batch, self.actor(prev_obs_batch)).mean()
-            self.actor_optimizer.zero_grad()
-            policy_loss.backward()
-            self.actor_optimizer.step()
+        #Policy Loss
+        policy_loss = -self.critic(prev_obs_batch, self.actor(prev_obs_batch)).mean()
+        self.actor_optimizer.zero_grad()
+        policy_loss.backward()
+        self.actor_optimizer.step()
 
-            writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
+        writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
-            for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
-                target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
+        for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
+            target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
 
-            for target_param, self_param in zip(self.critic_target.parameters(), self.critic.parameters()):
-                target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
+        for target_param, self_param in zip(self.critic_target.parameters(), self.critic.parameters()):
+            target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
 
 
 
@@ -237,52 +238,59 @@ def train():
     env.seed(123)
     random.seed(123)
 
-    for j in range(50): #num of training iterations 50
-        done = False;
-        prev_obs = env.reset()
-        prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
-        eps_reward = 0.
-        run = 0
+    done = False;
+    prev_obs = env.reset()
+    prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
+    eps_reward = 0.
+    run = 0
+    for j in range(60000): #num of training iterations 50
+
         print("j: ", j)
-        for step in range(25000): #25000
-            if done:
-                # Store episode statistics
-                # avg_eps_reward.update(eps_reward)
-                # if 'success' in info:
-                #     avg_success_rate.update(int(info['success']))
-                #print ("Run: " + str(run) + ", score: " + str(eps_reward))
+        if done:
+
+            # Store episode statistics
+            # avg_eps_reward.update(eps_reward)
+            # if 'success' in info:
+            #     avg_success_rate.update(int(info['success']))
+            #print ("Run: " + str(run) + ", score: " + str(eps_reward))
 
 
-                writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, j * 25000 + step)
+            writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
 
-                run+=1
+            run+=1
 
 
-                # Reset Environment
-                obs = env.reset()
-                obs = torch.tensor(obs, dtype=torch.float32)
-                eps_reward = 0.
-            else:
-                obs = prev_obs
-            env.render()
-            action = policy.act(obs)
-            action = noise.get_action(action, step, j)
-            #print("action shape: ", action.shape)
-            #print("action: ", action)
-            #learn to debug ipdb
-            obs, reward, done, info = env.step(action) #action.item()
-            #print('obs type: ', type(obs))
+            # Reset Environment
+            done = False
+            prev_obs = env.reset()
+            prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
+            obs = env.reset()
+            #obs = torch.tensor(obs, dtype=torch.float32)
+            eps_reward = 0.
+            continue
+        else:
+            obs = prev_obs
+        env.render()
+        action = policy.act(obs)
+        action = noise.get_action(action, j)
+        #print("action shape: ", action.shape)
+        #print("action: ", action)
+        #learn to debug ipdb
+        obs, reward, done, info = env.step(action) #action.item()
+        #print('obs type: ', type(obs))
 
-            done = torch.tensor(done, dtype=torch.float32)
-            reward = torch.tensor(reward, dtype=torch.float32)
-            reward = reward
-            #print('obs.shape', obs.shape)
-            #print('action.shape', action.shape)
-            rollouts.insert((step, done, action, reward, prev_obs.numpy(), obs)) #obs is numpy array
+        done = torch.tensor(done, dtype=torch.float32)
+        reward = torch.tensor(reward, dtype=torch.float32)
+        reward = reward
+        #print('obs.shape', obs.shape)
+        #print('action.shape', action.shape)
+        rollouts.insert((j, done, action, reward, prev_obs.numpy(), obs)) #obs is numpy array
 
-            prev_obs = torch.tensor(obs, dtype=torch.float32)
-            eps_reward += reward
-        policy.update(rollouts, j)
+        prev_obs = torch.tensor(obs, dtype=torch.float32)
+        eps_reward += reward
+        if len(rollouts.buffer) >= 64:
+            policy.update(rollouts, j)
+
 
 
     if not os.path.isdir('model'):
@@ -301,10 +309,10 @@ def train():
         print(param_tensor, "\t", policy.critic_target.state_dict()[param_tensor].size())
 
 
-    # torch.save(policy.actor.state_dict(), 'model/actor_param')
-    # torch.save(policy.actor_target.state_dict(), 'model/actor_target_param')
-    # torch.save(policy.critic.state_dict(), 'model/critic_param')
-    # torch.save(policy.critic_target.state_dict(), 'model/critic_target_param')
+    torch.save(policy.actor.state_dict(), 'model/actor_param')
+    torch.save(policy.actor_target.state_dict(), 'model/actor_target_param')
+    torch.save(policy.critic.state_dict(), 'model/critic_param')
+    torch.save(policy.critic_target.state_dict(), 'model/critic_target_param')
     #
     #
     # observation_space = env.observation_space.shape[0]
