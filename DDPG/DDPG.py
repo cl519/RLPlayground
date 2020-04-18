@@ -24,7 +24,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 #num of episodes:
 
 class OUNoise(object):
-    def __init__(self, action_space, mu=0.0, theta=0.15, max_sigma=0.3, min_sigma=0.2, decay_period=100000):
+    def __init__(self, action_space, mu=0.0, theta=0.15, max_sigma=0.3, min_sigma=0.3, decay_period=100000):
         self.mu = mu
         self.theta = theta
         self.sigma = max_sigma
@@ -47,7 +47,6 @@ class OUNoise(object):
 
     def get_action(self, action, t):
         ou_state = self.evolve_state()
-        #writer.add_scalar('ou_noise/train', ou_state, j * 25000 + t)
         self.sigma = self.max_sigma - (self.max_sigma - self.min_sigma) * min(1.0, t / self.decay_period)
         return np.clip(action + ou_state, self.low, self.high)
 
@@ -68,12 +67,9 @@ class RolloutStorage():
             step_list.append(s)
             done_list.append(d)
             action_list.append(a)
-            #print('a: ', a)
             reward_list.append(r)
             prev_obs_list.append(po)
             obs_list.append(o)
-            #print('po: ', po)
-            #print('o: ', o)
         return torch.tensor(step_list, dtype=torch.float), torch.tensor(done_list), \
                    torch.tensor(action_list, dtype=torch.float), torch.tensor(reward_list, dtype=torch.float), \
                    torch.tensor(prev_obs_list, dtype=torch.float), torch.tensor(obs_list, dtype=torch.float)
@@ -82,9 +78,10 @@ class RolloutStorage():
 
 
 class ActorNetwork(nn.Module):
-    def __init__(self, num_inputs, num_actions, hidden_dim):
+    def __init__(self, num_inputs, num_actions, hidden_dim, action_space):
         super().__init__()
         self.num_actions = num_actions
+        self.action_space = action_space
         self.fc = nn.Sequential(
             nn.Linear(num_inputs, 400),
             nn.ReLU(),
@@ -94,7 +91,7 @@ class ActorNetwork(nn.Module):
         )
 
     def forward(self, state):
-        return F.tanh(self.fc(state))
+        return torch.tensor(self.action_space.high) * (F.tanh(self.fc(state)))
 
 class CriticNetwork(nn.Module):
     def __init__(self, num_inputs, num_actions, hidden_dim):
@@ -110,24 +107,18 @@ class CriticNetwork(nn.Module):
         )
 
     def forward(self, state, action):
-        #print('state.shape ', state.shape)
-        #print('action.shape ', action.shape)
-        #x = torch.cat([state, action], 1)
         x = self.fc1(state)
-        #print(x.shape)
-        #print(torch.cat([x, action], 1).shape)
-        #print('x.shape ', x.shape)
         return self.fc2(torch.cat([x, action], 1))
 
 class DDPGAgent:
-    def __init__(self, num_inputs, num_actions, hidden_dim = 128, batch_size = 64, policy_epochs = 8,
+    def __init__(self, num_inputs, num_actions, action_space, hidden_dim = 128, batch_size = 64, policy_epochs = 8,
                  entropy_coef=0.001, gamma=0.99, tau = 0.001):
         #super().__init__(num_inputs, num_actions, hidden_dim, learning_rate, batch_size, policy_epochs, entropy_coef)
         self.policy_epochs = policy_epochs
         self.batch_size = batch_size
 
-        self.actor = ActorNetwork(num_inputs, num_actions, hidden_dim)
-        self.actor_target = ActorNetwork(num_inputs, num_actions, hidden_dim)
+        self.actor = ActorNetwork(num_inputs, num_actions, hidden_dim, action_space)
+        self.actor_target = ActorNetwork(num_inputs, num_actions, hidden_dim, action_space)
 
         self.critic = CriticNetwork(num_inputs, num_actions, hidden_dim)
         self.critic_target = CriticNetwork(num_inputs, num_actions, hidden_dim)
@@ -153,8 +144,6 @@ class DDPGAgent:
 
         #obs = Variable(torch.from_numpy(obs).float().unsqueeze(0))
         action = self.actor.forward(obs)
-        #print("action actor returns: ", action)
-        #action = action.detach().numpy()[0,0]
         # print('---------act--------')
         # print('action shape before detach: ', action.shape)
         # print('action type: ', type(action))
@@ -229,7 +218,7 @@ def train():
     num_actions = env.action_space.shape[0]
     rollouts = RolloutStorage(obs_size)
 
-    policy = DDPGAgent(obs_size, num_actions)
+    policy = DDPGAgent(obs_size, num_actions, env.action_space)
     noise = OUNoise(env.action_space)
 
     #SETTING SEED: it is good practice to set seeds when running experiments to keep results comparable
@@ -243,17 +232,10 @@ def train():
     prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
     eps_reward = 0.
     run = 0
-    for j in range(60000): #num of training iterations 50
+    for j in range(60000):
 
         print("j: ", j)
         if done:
-
-            # Store episode statistics
-            # avg_eps_reward.update(eps_reward)
-            # if 'success' in info:
-            #     avg_success_rate.update(int(info['success']))
-            #print ("Run: " + str(run) + ", score: " + str(eps_reward))
-
 
             writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
 
@@ -273,17 +255,12 @@ def train():
         env.render()
         action = policy.act(obs)
         action = noise.get_action(action, j)
-        #print("action shape: ", action.shape)
-        #print("action: ", action)
-        #learn to debug ipdb
         obs, reward, done, info = env.step(action) #action.item()
         #print('obs type: ', type(obs))
 
         done = torch.tensor(done, dtype=torch.float32)
         reward = torch.tensor(reward, dtype=torch.float32)
         reward = reward
-        #print('obs.shape', obs.shape)
-        #print('action.shape', action.shape)
         rollouts.insert((j, done, action, reward, prev_obs.numpy(), obs)) #obs is numpy array
 
         prev_obs = torch.tensor(obs, dtype=torch.float32)
