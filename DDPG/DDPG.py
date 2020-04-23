@@ -78,7 +78,7 @@ class RolloutStorage():
 
 
 class ActorNetwork(nn.Module):
-    def __init__(self, num_inputs, num_actions, hidden_dim, action_space):
+    def __init__(self, num_inputs, num_actions, action_space, hidden_dim):
         super().__init__()
         self.num_actions = num_actions
         self.action_space = action_space
@@ -117,8 +117,8 @@ class DDPGAgent:
         self.policy_epochs = policy_epochs
         self.batch_size = batch_size
 
-        self.actor = ActorNetwork(num_inputs, num_actions, hidden_dim, action_space)
-        self.actor_target = ActorNetwork(num_inputs, num_actions, hidden_dim, action_space)
+        self.actor = ActorNetwork(num_inputs, num_actions, action_space, hidden_dim)
+        self.actor_target = ActorNetwork(num_inputs, num_actions, action_space, hidden_dim)
 
         self.critic = CriticNetwork(num_inputs, num_actions, hidden_dim)
         self.critic_target = CriticNetwork(num_inputs, num_actions, hidden_dim)
@@ -133,8 +133,9 @@ class DDPGAgent:
         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3, weight_decay=0.01)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-5)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-5) #1e-3 blows up at the end, 1e-4 spiky the whole time
+        #weight_decay=0.01
 
     def act(self, obs):
         # state = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
@@ -148,7 +149,7 @@ class DDPGAgent:
         # print('action shape before detach: ', action.shape)
         # print('action type: ', type(action))
         # print('---------act--------')
-
+        #print("action before detach numpy: ", action)
         action = action.detach().numpy()[0] #TODO???
         #print("action after detach numpy and[0]: ", action)
         return action
@@ -170,10 +171,11 @@ class DDPGAgent:
 
         critic_loss = self.critic_criterion(QValue, QValPrime.detach())
         self.critic_optimizer.zero_grad()
+        print("critic loss: ", critic_loss)
         critic_loss.backward()
         self.critic_optimizer.step()
 
-        writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
+        #writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
 
         #Policy Loss
         policy_loss = -self.critic(prev_obs_batch, self.actor(prev_obs_batch)).mean()
@@ -181,7 +183,7 @@ class DDPGAgent:
         policy_loss.backward()
         self.actor_optimizer.step()
 
-        writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
+        #writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
         for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
             target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
@@ -218,26 +220,28 @@ def train():
     num_actions = env.action_space.shape[0]
     rollouts = RolloutStorage(obs_size)
 
-    policy = DDPGAgent(obs_size, num_actions, env.action_space)
-    noise = OUNoise(env.action_space)
-
     #SETTING SEED: it is good practice to set seeds when running experiments to keep results comparable
     np.random.seed(123)
     torch.manual_seed(123)
     env.seed(123)
     random.seed(123)
 
-    done = False;
+
+    policy = DDPGAgent(obs_size, num_actions, env.action_space)
+    noise = OUNoise(env.action_space)
+
+    done = False
     prev_obs = env.reset()
     prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
     eps_reward = 0.
     run = 0
-    for j in range(60000):
+    episode_steps = 0
+    for j in range(1000):
 
         print("j: ", j)
         if done:
 
-            writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
+            #writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
 
             run+=1
 
@@ -247,20 +251,26 @@ def train():
             prev_obs = env.reset()
             prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
             obs = env.reset()
-            #obs = torch.tensor(obs, dtype=torch.float32)
+            obs = torch.tensor(obs, dtype=torch.float32)
             eps_reward = 0.
-            continue
+            episode_steps = 0
         else:
             obs = prev_obs
         env.render()
         action = policy.act(obs)
+        #print("action policy returns: ", type(action))
         action = noise.get_action(action, j)
+        #print("action noise returns: ", type(action))
         obs, reward, done, info = env.step(action) #action.item()
         #print('obs type: ', type(obs))
+
+        episode_steps += 1
 
         done = torch.tensor(done, dtype=torch.float32)
         reward = torch.tensor(reward, dtype=torch.float32)
         reward = reward
+
+
         rollouts.insert((j, done, action, reward, prev_obs.numpy(), obs)) #obs is numpy array
 
         prev_obs = torch.tensor(obs, dtype=torch.float32)
