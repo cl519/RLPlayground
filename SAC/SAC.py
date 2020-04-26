@@ -181,24 +181,24 @@ class SAC:
 
         policy_loss = -(torch.min(Q1_pi, Q2_pi) - self.alpha * log_pi).mean()
 
-        print("Q1_loss: ", Q1_loss)
-        self.Q1_optimizer.zero_grad()
-        Q1_loss.backward()#need retain graph?
-        self.Q1_optimizer.step()
 
-        #writer.add_scalar('Q1Loss/train', Q1_loss, train_iter)
+        #print("Q1_loss: ", Q1_loss)
+        self.Q1_optimizer.zero_grad()
+        Q1_loss.backward(retain_graph=True)#need retain graph?
+        self.Q1_optimizer.step()
+        writer.add_scalar('Q1Loss/train', Q1_loss, train_iter)
 
         self.Q2_optimizer.zero_grad()
-        Q2_loss.backward()
+        Q2_loss.backward(retain_graph=True)
         self.Q2_optimizer.step()
 
-        #writer.add_scalar('Q2Loss/train', Q2_loss, train_iter)
+        writer.add_scalar('Q2Loss/train', Q2_loss, train_iter)
 
         self.actor_optimizer.zero_grad()
         policy_loss.backward()
         self.actor_optimizer.step()
 
-        #writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
+        writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
         for target_param, self_param in zip(self.Q1_target.parameters(), self.Q1.parameters()):
             target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
@@ -235,7 +235,7 @@ def train():
         print("j: ", j)
         if done:
 
-            #writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
+            writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
 
             run+=1
 

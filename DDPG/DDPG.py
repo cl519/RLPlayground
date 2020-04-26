@@ -2,9 +2,9 @@ import random
 import gym
 import numpy as np
 from collections import deque
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.optimizers import Adam
+# from keras.models import Sequential
+# from keras.layers import Dense
+# from keras.optimizers import Adam
 import os
 
 import torch
@@ -236,7 +236,7 @@ def train():
     eps_reward = 0.
     run = 0
     episode_steps = 0
-    for j in range(1000):
+    for j in range(60000):
 
         print("j: ", j)
         if done:
