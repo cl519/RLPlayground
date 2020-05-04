@@ -25,7 +25,7 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 def GNoise(action, action_space):
     # print("action before noise: ", action)
-    action += 0.01 * np.random.randn(action_space.shape[0])
+    action += 0.1 * np.random.randn(action_space.shape[0])
     # print("action after noise: ", action)
     ret = np.clip(action, -action_space.high, action_space.high)
     # print("action after clipping: ", ret)
@@ -188,18 +188,6 @@ class DDPGAgent:
         QValPrime = returns_batch.unsqueeze(1) + (1-done_batch)*self.gamma * Next_QValue #Added unsqueeze in order to broadcast
         critic_loss = self.critic_criterion(QValue, QValPrime.detach())
 
-
-        # #DOESN"T USE TARGET NETWORKS
-        # # select next action
-        # next_action = self.actor(obs_batch).detach()
-        # # Compute target Q-value:
-        # target_Q = self.critic(obs_batch, next_action).detach()
-        # target_Q = returns_batch + ((1 - done_batch) * self.gamma * target_Q)
-        # # Optimize Critic:
-        # critic_loss = self.critic_criterion(self.critic(prev_obs_batch, actions_batch), target_Q)
-
-
-
         self.critic_optimizer.zero_grad()
         #print("critic loss: ", critic_loss)
         critic_loss.backward()
@@ -242,9 +230,6 @@ def train():
     #             break
     # env.close()
 
-
-
-    #env = gym.make('HalfCheetah-v2')
     env = gym.make('MountainCarContinuous-v0')
     obs_size = env.observation_space.shape[0]
     num_actions = env.action_space.shape[0]
@@ -272,9 +257,7 @@ def train():
         if done:
 
             # writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
-
             run+=1
-
 
             # Reset Environment
             done = False
@@ -336,25 +319,7 @@ def train():
     torch.save(policy.actor_target.state_dict(), 'model/actor_target_param')
     torch.save(policy.critic.state_dict(), 'model/critic_param')
     torch.save(policy.critic_target.state_dict(), 'model/critic_target_param')
-    #
-    #
-    # observation_space = env.observation_space.shape[0]
-    # #action_space = env.action_space.n
-    # while True:
-    #     state = env.reset()
-    #     state = torch.tensor(state, dtype=torch.float32)
-    #     while True:
-    #         env.render()
-    #         #print("evaluation state: ", state)
-    #         action, _ = policy.act(state)
-    #         #print("evalulation action: ", action)
-    #         state, reward, terminal, info = env.step(action.item())
-    #         state = torch.tensor(state, dtype=torch.float32)
-    #
-    #         #state_next = np.reshape(state_next, [1, observation_space])
-    #         #state = state_next
-    #         if terminal:
-    #             break
+
 
 def eval():
     env = gym.make('MountainCarContinuous-v0')
