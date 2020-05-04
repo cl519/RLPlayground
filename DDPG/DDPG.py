@@ -23,8 +23,16 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 #reset noise at the beginning of episode
 #num of episodes:
 
+def GNoise(action, action_space):
+    # print("action before noise: ", action)
+    action += 0.01 * np.random.randn(action_space.shape[0])
+    # print("action after noise: ", action)
+    ret = np.clip(action, -action_space.high, action_space.high)
+    # print("action after clipping: ", ret)
+    return ret
+
 class OUNoise(object):
-    def __init__(self, action_space, mu=0.0, theta=0.15, max_sigma=0.3, min_sigma=0.3, decay_period=100000):
+    def __init__(self, action_space, mu=0.0, theta=0.15, max_sigma=0.3, min_sigma=0.2, decay_period=100000):
         self.mu = mu
         self.theta = theta
         self.sigma = max_sigma
@@ -96,23 +104,32 @@ class ActorNetwork(nn.Module):
 class CriticNetwork(nn.Module):
     def __init__(self, num_inputs, num_actions, hidden_dim):
         super().__init__()
-        self.fc1 = nn.Sequential(
-            nn.Linear(num_inputs, 400),
+        # self.fc1 = nn.Sequential(
+        #     nn.Linear(num_inputs, 400),
+        #     nn.ReLU(),
+        # )
+        # self.fc2 = nn.Sequential(
+        #     nn.Linear(400 + num_actions, 300),
+        #     nn.ReLU(),
+        #     nn.Linear(300, num_actions)
+        # )
+
+        self.fc = nn.Sequential(
+            nn.Linear(num_inputs + num_actions, 400),
             nn.ReLU(),
-        )
-        self.fc2 = nn.Sequential(
-            nn.Linear(400 + num_actions, 300),
+            nn.Linear(400, 300),
             nn.ReLU(),
             nn.Linear(300, num_actions)
         )
 
     def forward(self, state, action):
-        x = self.fc1(state)
-        return self.fc2(torch.cat([x, action], 1))
+        # x = self.fc1(state)
+        # return self.fc2(torch.cat([x, action], 1))
+        return self.fc(torch.cat([state, action], 1))
 
 class DDPGAgent:
     def __init__(self, num_inputs, num_actions, action_space, hidden_dim = 128, batch_size = 64, policy_epochs = 8,
-                 entropy_coef=0.001, gamma=0.99, tau = 0.001):
+                 entropy_coef=0.001, gamma=0.95, tau = 0.001):
         #super().__init__(num_inputs, num_actions, hidden_dim, learning_rate, batch_size, policy_epochs, entropy_coef)
         self.policy_epochs = policy_epochs
         self.batch_size = batch_size
@@ -133,8 +150,8 @@ class DDPGAgent:
         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-5)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-5) #1e-3 blows up at the end, 1e-4 spiky the whole time
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-3)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3) #1e-3 blows up at the end, 1e-4 spiky the whole time
         #weight_decay=0.01
 
     def act(self, obs):
@@ -161,6 +178,7 @@ class DDPGAgent:
 
         _, done_batch, actions_batch, returns_batch, prev_obs_batch, obs_batch = data
 
+        #USE TARGET NETWORKS
         #Critic Loss
         QValue = self.critic(prev_obs_batch, actions_batch)
         next_actions_batch = self.actor_target(obs_batch)
@@ -168,10 +186,22 @@ class DDPGAgent:
         #print('returns_batch before unsqeeze: ', returns_batch.shape)
         #print('returns_batch after unsqqeze: ', returns_batch.unsqueeze((1)).shape)
         QValPrime = returns_batch.unsqueeze(1) + (1-done_batch)*self.gamma * Next_QValue #Added unsqueeze in order to broadcast
-
         critic_loss = self.critic_criterion(QValue, QValPrime.detach())
+
+
+        # #DOESN"T USE TARGET NETWORKS
+        # # select next action
+        # next_action = self.actor(obs_batch).detach()
+        # # Compute target Q-value:
+        # target_Q = self.critic(obs_batch, next_action).detach()
+        # target_Q = returns_batch + ((1 - done_batch) * self.gamma * target_Q)
+        # # Optimize Critic:
+        # critic_loss = self.critic_criterion(self.critic(prev_obs_batch, actions_batch), target_Q)
+
+
+
         self.critic_optimizer.zero_grad()
-        print("critic loss: ", critic_loss)
+        #print("critic loss: ", critic_loss)
         critic_loss.backward()
         self.critic_optimizer.step()
 
@@ -183,7 +213,7 @@ class DDPGAgent:
         policy_loss.backward()
         self.actor_optimizer.step()
 
-        #writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
+        # writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
         for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
             target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
@@ -221,10 +251,10 @@ def train():
     rollouts = RolloutStorage(obs_size)
 
     #SETTING SEED: it is good practice to set seeds when running experiments to keep results comparable
-    np.random.seed(123)
-    torch.manual_seed(123)
-    env.seed(123)
-    random.seed(123)
+    np.random.seed(345)
+    torch.manual_seed(345)
+    env.seed(345)
+    random.seed(345)
 
 
     policy = DDPGAgent(obs_size, num_actions, env.action_space)
@@ -241,7 +271,7 @@ def train():
         print("j: ", j)
         if done:
 
-            #writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
+            # writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
 
             run+=1
 
@@ -258,9 +288,15 @@ def train():
             obs = prev_obs
         env.render()
         action = policy.act(obs)
-        #print("action policy returns: ", type(action))
-        action = noise.get_action(action, j)
-        #print("action noise returns: ", type(action))
+        # action = noise.get_action(action, j)
+        print("original action as array: ", np.asarray(action))
+        print("asarray type: ", type(np.asarray(action)))
+        print("asarray shape: ", np.asarray(action).shape)
+        action = GNoise(action, env.action_space)
+        print("action after GNoise: ", action)
+        print("action type after GNoise: ", type(action))
+        print("action shape: ", action.shape)
+
         obs, reward, done, info = env.step(action) #action.item()
         #print('obs type: ', type(obs))
 
