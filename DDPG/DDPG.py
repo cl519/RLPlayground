@@ -22,14 +22,179 @@ writer = SummaryWriter()
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 # from .CPCEnv import ContinuousCartPoleEnv
 
+"""
+Classic cart-pole system implemented by Rich Sutton et al.
+Copied from http://incompleteideas.net/sutton/book/code/pole.c
+permalink: https://perma.cc/C9ZM-652R
+Continuous version by Ian Danforth
+"""
+
+import math
+import gym
+from gym import spaces, logger
+from gym.utils import seeding
+import numpy as np
+
+
+class ContinuousCartPoleEnv(gym.Env):
+    metadata = {
+        'render.modes': ['human', 'rgb_array'],
+        'video.frames_per_second': 50
+    }
+
+    def __init__(self):
+        self.gravity = 9.8
+        self.masscart = 1.0
+        self.masspole = 0.1
+        self.total_mass = (self.masspole + self.masscart)
+        self.length = 0.5  # actually half the pole's length
+        self.polemass_length = (self.masspole * self.length)
+        self.force_mag = 30.0
+        self.tau = 0.02  # seconds between state updates
+        self.min_action = -1.0
+        self.max_action = 1.0
+
+        # Angle at which to fail the episode
+        self.theta_threshold_radians = 12 * 2 * math.pi / 360
+        self.x_threshold = 2.4
+
+        # Angle limit set to 2 * theta_threshold_radians so failing observation
+        # is still within bounds
+        high = np.array([
+            self.x_threshold * 2,
+            np.finfo(np.float32).max,
+            self.theta_threshold_radians * 2,
+            np.finfo(np.float32).max])
+
+        self.action_space = spaces.Box(
+            low=self.min_action,
+            high=self.max_action,
+            shape=(1,)
+        )
+        self.observation_space = spaces.Box(-high, high)
+
+        self.seed()
+        self.viewer = None
+        self.state = None
+
+        self.steps_beyond_done = None
+
+    def seed(self, seed=None):
+        self.np_random, seed = seeding.np_random(seed)
+        return [seed]
+
+    def stepPhysics(self, force):
+        x, x_dot, theta, theta_dot = self.state
+        costheta = math.cos(theta)
+        sintheta = math.sin(theta)
+        temp = (force + self.polemass_length * theta_dot * theta_dot * sintheta) / self.total_mass
+        thetaacc = (self.gravity * sintheta - costheta * temp) / \
+            (self.length * (4.0/3.0 - self.masspole * costheta * costheta / self.total_mass))
+        xacc = temp - self.polemass_length * thetaacc * costheta / self.total_mass
+        x = x + self.tau * x_dot
+        x_dot = x_dot + self.tau * xacc
+        theta = theta + self.tau * theta_dot
+        theta_dot = theta_dot + self.tau * thetaacc
+        return (x, x_dot, theta, theta_dot)
+
+    def step(self, action):
+        assert self.action_space.contains(action), \
+            "%r (%s) invalid" % (action, type(action))
+        # Cast action to float to strip np trappings
+        force = self.force_mag * float(action)
+        self.state = self.stepPhysics(force)
+        x, x_dot, theta, theta_dot = self.state
+        done = x < -self.x_threshold \
+            or x > self.x_threshold \
+            or theta < -self.theta_threshold_radians \
+            or theta > self.theta_threshold_radians
+        done = bool(done)
+
+        if not done:
+            reward = 1.0
+        elif self.steps_beyond_done is None:
+            # Pole just fell!
+            self.steps_beyond_done = 0
+            reward = 1.0
+        else:
+            if self.steps_beyond_done == 0:
+                logger.warn("""
+You are calling 'step()' even though this environment has already returned
+done = True. You should always call 'reset()' once you receive 'done = True'
+Any further steps are undefined behavior.
+                """)
+            self.steps_beyond_done += 1
+            reward = 0.0
+
+        return np.array(self.state), reward, done, {}
+
+    def reset(self):
+        self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
+        self.steps_beyond_done = None
+        return np.array(self.state)
+
+    def render(self, mode='human'):
+        screen_width = 600
+        screen_height = 400
+
+        world_width = self.x_threshold * 2
+        scale = screen_width /world_width
+        carty = 100  # TOP OF CART
+        polewidth = 10.0
+        polelen = scale * 1.0
+        cartwidth = 50.0
+        cartheight = 30.0
+
+        if self.viewer is None:
+            from gym.envs.classic_control import rendering
+            self.viewer = rendering.Viewer(screen_width, screen_height)
+            l, r, t, b = -cartwidth / 2, cartwidth / 2, cartheight / 2, -cartheight / 2
+            axleoffset = cartheight / 4.0
+            cart = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
+            self.carttrans = rendering.Transform()
+            cart.add_attr(self.carttrans)
+            self.viewer.add_geom(cart)
+            l, r, t, b = -polewidth / 2, polewidth / 2, polelen-polewidth / 2, -polewidth / 2
+            pole = rendering.FilledPolygon([(l, b), (l, t), (r, t), (r, b)])
+            pole.set_color(.8, .6, .4)
+            self.poletrans = rendering.Transform(translation=(0, axleoffset))
+            pole.add_attr(self.poletrans)
+            pole.add_attr(self.carttrans)
+            self.viewer.add_geom(pole)
+            self.axle = rendering.make_circle(polewidth / 2)
+            self.axle.add_attr(self.poletrans)
+            self.axle.add_attr(self.carttrans)
+            self.axle.set_color(.5, .5, .8)
+            self.viewer.add_geom(self.axle)
+            self.track = rendering.Line((0, carty), (screen_width, carty))
+            self.track.set_color(0, 0, 0)
+            self.viewer.add_geom(self.track)
+
+        if self.state is None:
+            return None
+
+        x = self.state
+        cartx = x[0] * scale + screen_width / 2.0  # MIDDLE OF CART
+        self.carttrans.set_translation(cartx, carty)
+        self.poletrans.set_rotation(-x[2])
+
+        return self.viewer.render(return_rgb_array=(mode == 'rgb_array'))
+
+    def close(self):
+        if self.viewer:
+            self.viewer.close()
+
 
 def GNoise(action, action_space):
     # print("action before noise: ", action)
-    action += 0.1 * np.random.randn(action_space.shape[0])
+    action += 0.05 * np.random.randn(action_space.shape[0]) #TODO: try smaller noise scale
     # print("action after noise: ", action)
     ret = np.clip(action, action_space.low, action_space.high)
     # print("action after clipping: ", ret)
     return ret
+
+#TODO: print all dimensions
+#Try continuous Cartpoletry print alStick wi
 
 class OUNoise(object):
     def __init__(self, action_space, mu=0.0, theta=0.15, max_sigma=0.3, min_sigma=0.2, decay_period=100000):
@@ -59,7 +224,7 @@ class OUNoise(object):
         return np.clip(action + ou_state, self.low, self.high)
 
 class RolloutStorage():
-    def __init__(self, obs_size, BUFFER_LIMIT = 8000): #used to be 1000000
+    def __init__(self, obs_size, BUFFER_LIMIT = 8000): #used to be 1e6
         self.buffer = collections.deque(maxlen = BUFFER_LIMIT)
         self.obs_size = obs_size
 
@@ -130,7 +295,7 @@ class CriticNetwork(nn.Module):
 
 class DDPGAgent:
     def __init__(self, num_inputs, num_actions, action_space, hidden_dim = 128, batch_size = 64, policy_epochs = 8,
-                 entropy_coef=0.001, gamma=0.95, tau = 0.01):
+                 entropy_coef=0.001, gamma=0.99, tau = 0.01):
         #super().__init__(num_inputs, num_actions, hidden_dim, learning_rate, batch_size, policy_epochs, entropy_coef)
         self.policy_epochs = policy_epochs
         self.batch_size = batch_size
@@ -151,8 +316,8 @@ class DDPGAgent:
         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-3)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3, weight_decay=0.01) #1e-3 blows up at the end, 1e-4 spiky the whole time
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-4) #1e-3 blows up at the end, 1e-4 spiky the whole time
         #weight_decay=0.01
 
     def act(self, obs):
@@ -167,9 +332,9 @@ class DDPGAgent:
         # print('action shape before detach: ', action.shape)
         # print('action type: ', type(action))
         # print('---------act--------')
-        #print("action before detach numpy: ", action)
+        # print("action before detach numpy: ", action)
         action = action.detach().numpy()[0] #TODO???
-        #print("action after detach numpy and[0]: ", action)
+        # print("action after detach numpy and[0]: ", action)
         return action
 
     def update(self, rollouts, train_iter):
@@ -207,19 +372,37 @@ class DDPGAgent:
 
         writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
 
+        for p in self.critic.parameters():
+            p.requires_grad = False
+
+        # print('-----POLICY LOSS DIMENSION CHECK-----')
+        #
+        # print('prev_obs_batch.shape: ', prev_obs_batch.shape)
+        # # print('prev_obs_batch: ', prev_obs_batch)
+        # print('self.actor(prev_obs_batch.shape): ', self.actor(prev_obs_batch).shape)
+        # # print('self.actor(prev_obs_batch): ', self.actor(prev_obs_batch))
+        # print('self.critic(prev_obs_batch, self.actor(prev_obs_batch)).shape: ', self.critic(prev_obs_batch, self.actor(prev_obs_batch)).shape)
+        # # print('self.critic(prev_obs_batch, self.actor(prev_obs_batch)): ', self.critic(prev_obs_batch, self.actor(prev_obs_batch)))
+        # print('self.critic(prev_obs_batch, self.actor(prev_obs_batch)).mean().shape: ', self.critic(prev_obs_batch, self.actor(prev_obs_batch)).mean().shape)
+
+
         #Policy Loss
         policy_loss = -self.critic(prev_obs_batch, self.actor(prev_obs_batch)).mean()
         self.actor_optimizer.zero_grad()
         policy_loss.backward()
         self.actor_optimizer.step()
 
+        for p in self.critic.parameters():
+            p.requires_grad = True
+
         writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
-        for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
-            target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
+        with torch.no_grad():
+            for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
+                target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
 
-        for target_param, self_param in zip(self.critic_target.parameters(), self.critic.parameters()):
-            target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
+            for target_param, self_param in zip(self.critic_target.parameters(), self.critic.parameters()):
+                target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
 
 
 
@@ -244,17 +427,17 @@ def train():
 
     # env = gym.make('HalfCheetah-v2')
 
-    env = gym.make('MountainCarContinuous-v0')
-    # env = ContinuousCartPoleEnv();
+    # env = gym.make('MountainCarContinuous-v0')
+    env = ContinuousCartPoleEnv();
     obs_size = env.observation_space.shape[0]
     num_actions = env.action_space.shape[0]
     rollouts = RolloutStorage(obs_size)
 
     #SETTING SEED: it is good practice to set seeds when running experiments to keep results comparable
-    np.random.seed(345)
-    torch.manual_seed(345)
-    env.seed(345)
-    random.seed(345)
+    np.random.seed(234)
+    torch.manual_seed(234)
+    env.seed(234)
+    random.seed(234)
 
 
     policy = DDPGAgent(obs_size, num_actions, env.action_space)
@@ -266,7 +449,7 @@ def train():
     eps_reward = 0.
     run = 0
     episode_steps = 0
-    for j in range(60000):
+    for j in range(60000): #60000
 
         print("j: ", j)
         if done:
@@ -286,11 +469,11 @@ def train():
             obs = prev_obs
         env.render()
         action = policy.act(obs)
-        action = noise.get_action(action, j)
+        # action = noise.get_action(action, j)
         # print("original action as array: ", np.asarray(action))
         # print("asarray type: ", type(np.asarray(action)))
         # print("asarray shape: ", np.asarray(action).shape)
-        # action = GNoise(action, env.action_space)
+        action = GNoise(action, env.action_space)
         # print("action after GNoise: ", action)
         # print("action type after GNoise: ", type(action))
         # print("action shape: ", action.shape)
