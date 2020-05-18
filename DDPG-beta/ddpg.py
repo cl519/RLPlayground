@@ -10,42 +10,14 @@ import collections
 from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter()
 
-class OUNoise(object):
-    def __init__(self, action_space, mu=0.0, theta=0.15, max_sigma=0.3, min_sigma=0.2, decay_period=100000):
-        self.mu = mu
-        self.theta = theta
-        self.sigma = max_sigma
-        self.max_sigma = max_sigma
-        self.min_sigma = min_sigma
-        self.decay_period = decay_period
-        self.action_dim = action_space.shape[0]
-        self.low = action_space.low
-        self.high = action_space.high
-        self.reset()
-
-    def reset(self):
-        self.state = np.ones(self.action_dim) * self.mu
-
-    def evolve_state(self):
-        x = self.state
-        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
-        self.state = x + dx
-        return self.state
-
-    def get_action(self, action, t):
-        ou_state = self.evolve_state()
-        self.sigma = self.max_sigma - (self.max_sigma - self.min_sigma) * min(1.0, t / self.decay_period)
-        return np.clip(action + ou_state, self.low, self.high)
-
-
 class ReplayBuffer:
-    def __init__(self, BUFFER_LIMIT = 16000):
+    def __init__(self, BUFFER_LIMIT = 8000):
         self.buffer = collections.deque(maxlen = BUFFER_LIMIT)
 
     def insert(self, transition):
         self.buffer.append(transition)
 
-    def batch_sampler(self, batch_size = 128):
+    def batch_sampler(self, batch_size = 64):
         mini_batch = random.sample(self.buffer, batch_size)
         step_list, done_list, action_list, reward_list, o_list, o2_list = [], [], [], [], [], []
         for transition  in mini_batch:
@@ -92,7 +64,7 @@ class CriticNetwork(nn.Module):
 
 class DDPGAgent:
     def __init__(self, num_inputs, num_actions, action_space):
-        self.batch_size = 128
+        self.batch_size = 64
 
         self.actor = ActorNetwork(num_inputs, num_actions, action_space)
         self.actor_target = ActorNetwork(num_inputs, num_actions, action_space)
@@ -187,7 +159,7 @@ def train():
         ep_ret += r
         ep_len += 1
 
-        d = False if ep_len==1000 else d
+        d = False if ep_len == 1000 else d
 
         rollouts.insert((j, d, a, r, o, o2))
 
@@ -197,7 +169,7 @@ def train():
             writer.add_scalar('TotalRewardPerEpisode/train', ep_ret, run)
             o, ep_ret, ep_len = env.reset(), 0, 0
 
-        if len(rollouts.buffer) >= 128:
+        if len(rollouts.buffer) >= 64:
             policy.update(rollouts, j)
 
 
