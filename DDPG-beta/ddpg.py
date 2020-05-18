@@ -150,9 +150,8 @@ def train():
         print("j: ", j)
 
         a = policy.act(torch.tensor(o, dtype=torch.float32))
-        a = noise.get_action(a, j)
-        # a += 0.1 * np.random.randn(num_actions)
-        # a = np.clip(a, action_space.low[0], action_space.high[0])
+        a += 0.1 * np.random.randn(num_actions)
+        a = np.clip(a, action_space.low[0], action_space.high[0])
 
         env.render()
         o2, r, d, _ = env.step(a)
