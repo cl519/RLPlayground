@@ -8,13 +8,14 @@ import torch.optim as optim
 import torch.nn.functional as F
 import collections
 from torch.utils.tensorboard import SummaryWriter
+import argparse
+
 writer = SummaryWriter()
 
 import math
 import gym
 from gym import spaces, logger
 from gym.utils import seeding
-import numpy as np
 
 import copy
 class OUNoise:
@@ -114,8 +115,8 @@ class DDPGAgent:
         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-5)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-5) #4
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3) #5
         self.critic_criterion = nn.MSELoss()
 
     def act(self, obs):
@@ -174,7 +175,7 @@ class DDPGAgent:
                 target_param.data.add_((1-self.polyak) * self_param.data)
 
 def train():
-    env = gym.make('Hopper-v3') #MountainCarContinuous-v0
+    env = gym.make('MountainCarContinuous-v0') #MountainCarContinuous-v0
     # env = ContinuousCartPoleEnv();
 
     obs_size = env.observation_space.shape[0]
@@ -193,7 +194,7 @@ def train():
     o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
 
     for j in range(100000):#60000
-        print("j: ", j)
+        print(j, ' transitions')
 
         a = policy.act(torch.tensor(o, dtype=torch.float32))
         noi = noise.sample()
@@ -223,5 +224,66 @@ def train():
             policy.update(rollouts, j)
 
 
+    if not os.path.isdir('model'):
+        os.makedirs('model')
+
+    torch.save(policy.actor.state_dict(), 'model/actor_param')
+    torch.save(policy.actor_target.state_dict(), 'model/actor_target_param')
+    torch.save(policy.critic.state_dict(), 'model/critic_param')
+    torch.save(policy.critic_target.state_dict(), 'model/critic_target_param')
+
+def test():
+    env = gym.make('MountainCarContinuous-v0')
+    obs_size = env.observation_space.shape[0]
+    num_actions = env.action_space.shape[0]
+
+    model = DDPGAgent(obs_size, num_actions)
+    #model.load.state_dict(torch.load(PATH))
+    hidden_dim = 128
+
+    model.actor = ActorNetwork(obs_size, num_actions, hidden_dim)
+    model.actor_target = ActorNetwork(obs_size, num_actions, hidden_dim)
+    model.critic = CriticNetwork(obs_size, num_actions, hidden_dim)
+    model.critic_target = CriticNetwork(obs_size, num_actions, hidden_dim)
+
+    # print("Model's state_dict:")
+    # for param_tensor in policy.actor.state_dict():
+    #     print(param_tensor, "\t", policy.actor.state_dict()[param_tensor].size())
+
+    model.actor.load_state_dict(torch.load('model/actor_param'))
+    model.actor_target.load_state_dict(torch.load('model/actor_target_param'))
+    model.critic.load_state_dict(torch.load('model/critic_param'))
+    model.critic_target.load_state_dict(torch.load('model/critic_target_param'))
+
+    np.random.seed(234)
+    torch.manual_seed(234)
+    env.seed(234)
+    random.seed(234)
+
+    o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
+
+    for i in range(10):
+        d = False
+        while not d:
+            a = policy.act(torch.tensor(o, dtype=torch.float32))
+            env.render()
+            o2, r, d, _ = env.step(a)
+            ep_ret += r
+
+            o = o2
+            if d or (ep_len == 1000):
+                writer.add_scalar('TotalRewardPerEpisode/test', ep_ret, run)
+                run += 1
+                o, ep_ret = env.reset(), 0, 0
+
+
 if __name__ == "__main__":
-    train()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', type=str, default='train') 
+    args = parser.parse_args()
+    mode = args.mode
+
+    if mode == 'train':
+        train()
+    elif mode == 'test':
+        test()
