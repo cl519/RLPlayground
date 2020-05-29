@@ -237,30 +237,30 @@ def test():
     obs_size = env.observation_space.shape[0]
     num_actions = env.action_space.shape[0]
 
-    model = DDPGAgent(obs_size, num_actions)
+    policy = DDPGAgent(obs_size, num_actions, env.action_space)
     #model.load.state_dict(torch.load(PATH))
     hidden_dim = 128
 
-    model.actor = ActorNetwork(obs_size, num_actions, hidden_dim)
-    model.actor_target = ActorNetwork(obs_size, num_actions, hidden_dim)
-    model.critic = CriticNetwork(obs_size, num_actions, hidden_dim)
-    model.critic_target = CriticNetwork(obs_size, num_actions, hidden_dim)
+    policy.actor = ActorNetwork(obs_size, num_actions, env.action_space)
+    policy.actor_target = ActorNetwork(obs_size, num_actions, env.action_space)
+    policy.critic = CriticNetwork(obs_size, num_actions)
+    policy.critic_target = CriticNetwork(obs_size, num_actions)
 
     # print("Model's state_dict:")
     # for param_tensor in policy.actor.state_dict():
     #     print(param_tensor, "\t", policy.actor.state_dict()[param_tensor].size())
 
-    model.actor.load_state_dict(torch.load('model/actor_param'))
-    model.actor_target.load_state_dict(torch.load('model/actor_target_param'))
-    model.critic.load_state_dict(torch.load('model/critic_param'))
-    model.critic_target.load_state_dict(torch.load('model/critic_target_param'))
+    policy.actor.load_state_dict(torch.load('model/actor_param'))
+    policy.actor_target.load_state_dict(torch.load('model/actor_target_param'))
+    policy.critic.load_state_dict(torch.load('model/critic_param'))
+    policy.critic_target.load_state_dict(torch.load('model/critic_target_param'))
 
     np.random.seed(234)
     torch.manual_seed(234)
     env.seed(234)
     random.seed(234)
 
-    o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
+    o, ep_ret, run = env.reset(), 0, 0
 
     for i in range(10):
         d = False
@@ -271,10 +271,10 @@ def test():
             ep_ret += r
 
             o = o2
-            if d or (ep_len == 1000):
+            if d:
                 writer.add_scalar('TotalRewardPerEpisode/test', ep_ret, run)
                 run += 1
-                o, ep_ret = env.reset(), 0, 0
+                o, ep_ret = env.reset(), 0
 
 
 if __name__ == "__main__":

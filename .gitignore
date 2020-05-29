@@ -3,3 +3,4 @@ runs/
 env/
 DDPG-old/
 .idea
+model/
