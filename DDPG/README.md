@@ -5,6 +5,18 @@ This is a Pytorch implementation of [**Deep Deterministic Policy Gradient**](htt
 
 ## Create the environment
 * Create a virtual environment with python 3+
+On macOS and Linux:
+```bath
+python3 -m venv env
+```
+On Windows:
+```bath
+py -m venv env
+```
+* activate the virtual environment by
+```bath
+source env/bin/activate
+```
 * run
 ```bath
 pip install -r requirements.txt
