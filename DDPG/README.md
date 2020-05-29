@@ -18,7 +18,7 @@ The result can be visualized on tensorboard using
 ```bath
 tensorboard --logdir=runs
 ```
-
+This also saves model paramaters inside model/ directory
 ## To test
 ```bath
 python ddpg.py --mode=test
