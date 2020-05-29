@@ -193,7 +193,7 @@ def train():
 
     o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
 
-    for j in range(1000):#60000#100000
+    for j in range(100000):#60000#100000
         print(j, ' transitions')
 
         a = policy.act(torch.tensor(o, dtype=torch.float32))
@@ -222,6 +222,8 @@ def train():
 
         if len(rollouts.buffer) >= 64:
             policy.update(rollouts, j)
+
+    env.close()
 
 
     if not os.path.isdir('model'):
@@ -275,6 +277,7 @@ def test():
                 writer.add_scalar('TotalRewardPerEpisode/test', ep_ret, run)
                 run += 1
                 o, ep_ret = env.reset(), 0
+    env.close()
 
 
 if __name__ == "__main__":
