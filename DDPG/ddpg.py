@@ -158,7 +158,7 @@ class DDPGAgent:
         for p in self.critic.parameters():
             p.requires_grad = True
 
-        writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
+        writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
 
         with torch.no_grad():
             # print('actor target parameters: ', self.actor_target.parameters())
