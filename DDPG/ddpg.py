@@ -9,11 +9,11 @@ import torch.nn.functional as F
 import collections
 from torch.utils.tensorboard import SummaryWriter
 import argparse
+import os
 
 writer = SummaryWriter()
 
 import math
-import gym
 from gym import spaces, logger
 from gym.utils import seeding
 
@@ -159,7 +159,7 @@ class DDPGAgent:
         for p in self.critic.parameters():
             p.requires_grad = True
 
-        writer.add_scalar('CriticLoss/train', critic_loss, train_iter)
+        writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
         with torch.no_grad():
             # print('actor target parameters: ', self.actor_target.parameters())
@@ -193,7 +193,7 @@ def train():
 
     o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
 
-    for j in range(100000):#60000
+    for j in range(1000):#60000#100000
         print(j, ' transitions')
 
         a = policy.act(torch.tensor(o, dtype=torch.float32))
