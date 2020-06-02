@@ -2,10 +2,8 @@ import random
 import gym
 import numpy as np
 from collections import deque
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.optimizers import Adam
 import os
+import itertools
 
 import torch
 import torch.nn as nn
@@ -17,7 +15,7 @@ import collections
 from torch.autograd import Variable
 
 from torch.utils.tensorboard import SummaryWriter
-writer = SummaryWriter()
+# writer = SummaryWriter()
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from torch.distributions import Normal
 
@@ -108,9 +106,9 @@ class CriticNetwork(nn.Module):
         )
 
     def forward(self, state, action):
-        return self.fc(torch.cat([state, action], 1))
+        return torch.squeeze(self.fc(torch.cat([state, action], 1)), -1)
 
-class SAC:
+class SAC: #fixed entropy regularization
     def __init__(self, num_inputs, num_actions, action_space, hidden_dim = 128, batch_size = 64, policy_epochs = 8,
                  entropy_coef=0.001, gamma=0.99, tau = 0.001, alpha = 0.2):
         #super().__init__(num_inputs, num_actions, hidden_dim, learning_rate, batch_size, policy_epochs, entropy_coef)
@@ -139,8 +137,8 @@ class SAC:
             target_param.data.copy_(param.data)
 
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
-        self.Q1_optimizer = optim.Adam(self.Q1.parameters(), lr=1e-3)
-        self.Q2_optimizer = optim.Adam(self.Q2.parameters(), lr=1e-3)
+        self.Q1_optimizer = optim.Adam(self.Q1.parameters(), lr=1e-5)
+        self.Q2_optimizer = optim.Adam(self.Q2.parameters(), lr=1e-5)
 
     def act(self, obs):
         # state = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
@@ -167,38 +165,59 @@ class SAC:
             next_state_action, next_state_log_pi, _ = self.actor.sample(obs_batch) #WE USE ACTOR, NOT ACTOR TARGET!
             Q1_next_target = self.Q1_target(obs_batch, next_state_action)
             Q2_next_target = self.Q2_target(obs_batch, next_state_action)
-            min_next_target = torch.min(Q1_next_target, Q2_next_target) - self.alpha * next_state_log_pi #How do I get this log pi? What information does this log pi give us?
+            print('Q1_next_target.shape: ', Q1_next_target.shape)
+            print('next_state_log_pi.shape: ', next_state_log_pi.shape)
+            min_next_target = torch.min(Q1_next_target, Q2_next_target) - self.alpha * next_state_log_pi.view(-1) #How do I get this log pi? What information does this log pi give us?
+            print('min_next_target.shape: ', min_next_target.shape)
+            print('returns_batch.shape: ', returns_batch.shape)
+            print('done_batch.shape: ', done_batch.shape)
             next_Qvalue = returns_batch + (1-done_batch) * self.gamma * min_next_target
+            print('next_QValue.shape: ', next_Qvalue.shape)
+
+        Q1 = self.Q1(prev_obs_batch, actions_batch)
+        Q2 = self.Q2(prev_obs_batch, actions_batch)
+        print('Q1.shape: ', Q1.shape)
+        print('Q2.shape: ', Q2.shape)
+        Q1_loss = self.critic_criterion(Q1, next_Qvalue)
+        Q2_loss = self.critic_criterion(Q2, next_Qvalue)
+
         pi, log_pi, _ = self.actor.sample(prev_obs_batch)
 
         Q1_pi = self.Q1(prev_obs_batch, pi)
         Q2_pi = self.Q2(prev_obs_batch, pi)
 
-        Q1_loss = self.critic_criterion(Q1_pi, next_Qvalue)
-        Q2_loss = self.critic_criterion(Q2_pi, next_Qvalue)
-
-
+        # Q1_loss = self.critic_criterion(Q1_pi, next_Qvalue)
+        # Q2_loss = self.critic_criterion(Q2_pi, next_Qvalue)
 
         policy_loss = -(torch.min(Q1_pi, Q2_pi) - self.alpha * log_pi).mean()
 
 
         #print("Q1_loss: ", Q1_loss)
         self.Q1_optimizer.zero_grad()
-        Q1_loss.backward(retain_graph=True)#need retain graph?
+        Q1_loss.backward(retain_graph=True)#need retain graph? retain_graph=True
         self.Q1_optimizer.step()
-        writer.add_scalar('Q1Loss/train', Q1_loss, train_iter)
+        # writer.add_scalar('Q1Loss/train', Q1_loss, train_iter)
 
         self.Q2_optimizer.zero_grad()
-        Q2_loss.backward(retain_graph=True)
+        Q2_loss.backward(retain_graph=True) #retain_graph=True
         self.Q2_optimizer.step()
 
-        writer.add_scalar('Q2Loss/train', Q2_loss, train_iter)
+        # writer.add_scalar('Q2Loss/train', Q2_loss, train_iter)
+
+        q_params = itertools.chain(self.Q1.parameters(), self.Q2.parameters())
+
+        for p in q_params:
+            p.requires_grad = False
 
         self.actor_optimizer.zero_grad()
         policy_loss.backward()
         self.actor_optimizer.step()
 
-        writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
+        for p in q_params:
+            p.requires_grad = True
+
+
+        # writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
         for target_param, self_param in zip(self.Q1_target.parameters(), self.Q1.parameters()):
             target_param.data.copy_(self_param.data * self.tau + target_param.data * (1 - self.tau))
@@ -215,10 +234,10 @@ def train():
     rollouts = RolloutStorage(obs_size)
 
     #SETTING SEED: it is good practice to set seeds when running experiments to keep results comparable
-    np.random.seed(123)
-    torch.manual_seed(123)
-    env.seed(123)
-    random.seed(123)
+    np.random.seed(234)
+    torch.manual_seed(234)
+    env.seed(234)
+    random.seed(234)
 
     policy = SAC(obs_size, num_actions, env.action_space) #can add  env.action_space if you want to scale by max environment action value
 
