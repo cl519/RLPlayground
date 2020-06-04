@@ -41,5 +41,24 @@ The result can be visualized on tensorboard using
 tensorboard --logdir=runs
 ```
 
+##Training details
+
+###MountainCarContinuous-v0
+
+The following result shows loss curves on three seeds.
+
+* Policy loss
+
+<img src="figures/policyloss.png" height="200"/>
+
+* Critic loss
+
+<img src="figures/criticloss.png" height="200"/>
+
+* Reward per episode
+
+<img src="figures/rewardpereps.png" height="200"/>
+
+
 ## Result
 According to [**here**](https://github.com/openai/gym/wiki/MountainCarContinuous-v0), getting a reward over 90 solves the MountainCar environment
