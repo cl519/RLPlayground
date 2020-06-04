@@ -41,23 +41,23 @@ The result can be visualized on tensorboard using
 tensorboard --logdir=runs
 ```
 
-##Training details
+## Training details
 
-###MountainCarContinuous-v0
+### MountainCarContinuous-v0
 
-The following result shows loss curves on three seeds.
+The following result shows loss curves on three different seeds.
 
 * Policy loss
 
-<img src="figures/policyloss.png" height="200"/>
+<img src="figures/policyloss.png" height="400"/>
 
 * Critic loss
 
-<img src="figures/criticloss.png" height="200"/>
+<img src="figures/criticloss.png" height="400"/>
 
 * Reward per episode
 
-<img src="figures/rewardpereps.png" height="200"/>
+<img src="figures/returnpereps.png" height="400"/>
 
 
 ## Result
