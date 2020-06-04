@@ -1,7 +1,9 @@
 # Deep Deterministic Policy Gradient
 
 ## Descriptions
-This is a Pytorch implementation of [**Deep Deterministic Policy Gradient**](https://arxiv.org/pdf/1509.02971.pdf). DDPG is an actor-critic, model-free algorithm based on the deterministic policy gradient that can operate over continuous action spaces. It uses off-policy data and the Bellman equation to learn the Q-function, and uses the Q-function to learn the policy. The idea is to combine the actor-critic approach with insights from DQN. DQN is able to learn value functions in a stable and robust way due to two reasons: 1. off-policy data from replay buffer to minimize correlation between samples 2. existence of target Q network to give consistent targets durign TD backups. The policy learning part is fairly simple because the action space is continuous, and so we can just perform gradient ascent to solve \max_{\theta} \underset{s \sim {\mathcal D}}{{\mathrm E}}\left[ Q_{\phi}(s, \mu_{\theta}(s)) \right]. For this implementation, we use time-correlated OU-noise the original paper suggested to encourage exploration.
+This is a Pytorch implementation of [**Deep Deterministic Policy Gradient**](https://arxiv.org/pdf/1509.02971.pdf).
+
+DDPG is an actor-critic, model-free algorithm based on the deterministic policy gradient that can operate over continuous action spaces. It uses off-policy data and the Bellman equation to learn the Q-function, and uses the Q-function to learn the policy. The idea is to combine the actor-critic approach with insights from DQN. DQN is able to learn value functions in a stable and robust way due to two reasons: 1. off-policy data from replay buffer to minimize correlation between samples 2. existence of target Q network to give consistent targets durign TD backups. The policy learning part is fairly simple because the action space is continuous, and so we can just perform gradient ascent to solve <img src="figures/policygoal" height="200"/>. For this implementation, we use time-correlated OU-noise the original paper suggested to encourage exploration.
 
 ## Create the environment
 * Create a virtual environment with python 3+
