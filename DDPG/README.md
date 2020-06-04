@@ -66,7 +66,7 @@ The following result shows loss curves on three different seeds.
 
 ## Evaluation
 
-[![Demo alpha](https://j.gifs.com/lxy75J.gif)]
+![Demo alpha](https://j.gifs.com/lxy75J.gif)
 
 
 ## Solved requirements
