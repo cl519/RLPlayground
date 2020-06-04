@@ -64,6 +64,10 @@ The following result shows loss curves on three different seeds.
 
 <img src="figures/returnpereps.png" height="400"/>
 
+## Evaluation
 
-## Result
+[![Demo alpha](https://j.gifs.com/lxy75J.gif)]
+
+
+## Solved requirements
 According to [**here**](https://github.com/openai/gym/wiki/MountainCarContinuous-v0), getting a reward over 90 solves the MountainCar environment
