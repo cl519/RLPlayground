@@ -55,6 +55,10 @@ tensorboard --logdir=runs
 
 <img src="figures/q1loss.png" height="400"/>
 
+* Q2 Loss
+
+<img src="figures/q2loss.png" height="400"/>
+
 * Reward per episode
 
 <img src="figures/returns.png" height="400"/>
