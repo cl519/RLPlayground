@@ -1,21 +1,15 @@
 import random
 import gym
 import numpy as np
-from collections import deque
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 import collections
 from torch.utils.tensorboard import SummaryWriter
 import argparse
 import os
 
 writer = SummaryWriter()
-
-import math
-from gym import spaces, logger
-from gym.utils import seeding
 
 import copy
 class OUNoise:
@@ -48,7 +42,6 @@ class ReplayBuffer:
 
     def batch_sampler(self, batch_size = 64):
         mini_batch = random.sample(self.buffer, batch_size)
-        # print('mini_batch: ', mini_batch)
         step_list, done_list, action_list, reward_list, o_list, o2_list = [], [], [], [], [], []
         for transition  in mini_batch:
             s, d, a, r, o, o2 = transition
@@ -75,9 +68,6 @@ class ActorNetwork(nn.Module):
         )
 
     def forward(self, state):
-        # print('self.fc(state): ', self.fc(state))
-        # print('F.tanh(self.fc(state)): ', torch.tanh(self.fc(state)))
-        # print('torch.tensor(self.action_space.high[0]) * (F.tanh(self.fc(state)))', torch.tensor(self.action_space.high[0]) * (torch.tanh(self.fc(state))))
         return torch.tensor(self.action_space.high[0]) * (torch.tanh(self.fc(state)))
 
 class CriticNetwork(nn.Module):
@@ -115,14 +105,12 @@ class DDPGAgent:
         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_param.data.copy_(param.data)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-5) #4
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3) #5
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-5)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=1e-3) 
         self.critic_criterion = nn.MSELoss()
 
     def act(self, obs):
         with torch.no_grad():
-            # print('without index: ', self.actor(obs).numpy())
-            # print('with index: ', self.actor(obs).numpy()[0])
             return self.actor(obs).numpy()
 
     def update(self, rollouts, train_iter):
@@ -133,13 +121,7 @@ class DDPGAgent:
         with torch.no_grad():
             na = self.actor_target(o2)
             Next_QValue = self.critic_target(o2, na)
-            # print('1-d shape: ', (1-d).shape)
-            # print('r shape: ', r.shape)
             QValPrime = r + self.gamma * (1-d) * Next_QValue
-            # print("QValPrime shape: ", QValPrime.shape)
-        # print('QValue shape: ', QValue.shape)
-        # print('QValPrime shape: ', QValPrime.shape)
-        # critic_loss = ((QValue.view(-1) - QValPrime)**2).mean()
         critic_loss = self.critic_criterion(QValue, QValPrime.detach())
 
         self.critic_optimizer.zero_grad()
@@ -162,12 +144,8 @@ class DDPGAgent:
         writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
 
         with torch.no_grad():
-            # print('actor target parameters: ', self.actor_target.parameters())
-            # print('actor parameters: ', self.actor.parameters())
             for target_param, self_param in zip(self.actor_target.parameters(), self.actor.parameters()):
-                # print('target_param data: ', target_param.data)
                 target_param.data.mul_(self.polyak)
-                # print('self_param data: ', self_param.data)
                 target_param.data.add_((1-self.polyak) * self_param.data)
 
             for target_param, self_param in zip(self.critic_target.parameters(), self.critic.parameters()):
@@ -175,8 +153,7 @@ class DDPGAgent:
                 target_param.data.add_((1-self.polyak) * self_param.data)
 
 def train():
-    env = gym.make('MountainCarContinuous-v0') #MountainCarContinuous-v0
-    # env = ContinuousCartPoleEnv();
+    env = gym.make('MountainCarContinuous-v0') 
 
     obs_size = env.observation_space.shape[0]
     num_actions = env.action_space.shape[0]
@@ -193,7 +170,7 @@ def train():
 
     o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
 
-    for j in range(100000):#60000#100000
+    for j in range(100000):
         print(j, ' transitions')
 
         a = policy.act(torch.tensor(o, dtype=torch.float32))
@@ -248,23 +225,19 @@ def test():
     policy.critic = CriticNetwork(obs_size, num_actions)
     policy.critic_target = CriticNetwork(obs_size, num_actions)
 
-    # print("Model's state_dict:")
-    # for param_tensor in policy.actor.state_dict():
-    #     print(param_tensor, "\t", policy.actor.state_dict()[param_tensor].size())
-
     policy.actor.load_state_dict(torch.load('model/actor_param'))
     policy.actor_target.load_state_dict(torch.load('model/actor_target_param'))
     policy.critic.load_state_dict(torch.load('model/critic_param'))
     policy.critic_target.load_state_dict(torch.load('model/critic_target_param'))
 
-    np.random.seed(234)
-    torch.manual_seed(234)
-    env.seed(234)
-    random.seed(234)
+    np.random.seed(2)
+    torch.manual_seed(2)
+    env.seed(2)
+    random.seed(2)
 
     o, ep_ret, run = env.reset(), 0, 0
 
-    for i in range(10):
+    for i in range(100):
         d = False
         while not d:
             a = policy.act(torch.tensor(o, dtype=torch.float32))
