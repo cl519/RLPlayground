@@ -1,21 +1,17 @@
 import random
-import gym
-import numpy as np
-from collections import deque
 import os
-import itertools
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.distributions.categorical import Categorical
-import time
 import collections
-from torch.autograd import Variable
 
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 # writer = SummaryWriter()
+import wandb
+wandb.init(project="sac")
+
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from torch.distributions import Normal
 
@@ -23,9 +19,14 @@ LOG_SIG_MAX = 2
 LOG_SIG_MIN = -20
 epsilon = 1e-6
 
+import math
+import gym
+from gym import spaces, logger
+from gym.utils import seeding
+import numpy as np
 
 class RolloutStorage():
-    def __init__(self, obs_size, BUFFER_LIMIT = 8000): #used to be 1000000
+    def __init__(self, obs_size, BUFFER_LIMIT = int(1e6)): #used to be 1000000 #8000
         self.buffer = collections.deque(maxlen = BUFFER_LIMIT)
         self.obs_size = obs_size
 
@@ -41,13 +42,10 @@ class RolloutStorage():
             step_list.append(s)
             done_list.append(d)
             action_list.append(a)
-            #print('a: ', a)
             reward_list.append(r)
             prev_obs_list.append(po)
             obs_list.append(o)
-            #print('po: ', po)
-            #print('o: ', o)
-        return torch.tensor(step_list, dtype=torch.float), torch.tensor(done_list), \
+        return torch.tensor(step_list, dtype=torch.float), torch.tensor(done_list, dtype=torch.float), \
                    torch.tensor(action_list, dtype=torch.float), torch.tensor(reward_list, dtype=torch.float), \
                    torch.tensor(prev_obs_list, dtype=torch.float), torch.tensor(obs_list, dtype=torch.float)
 
@@ -79,19 +77,21 @@ class ActorNetwork(nn.Module):
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max = LOG_SIG_MAX)
         return mean, log_std
 
-    def sample(self, state):# TODO understand why you need this
+    def sample(self, state):
         mean, log_std = self.forward(state)
         std = log_std.exp()
         normal = Normal(mean, std)
         x_t = normal.rsample()
         y_t = torch.tanh(x_t)
-        action = y_t * torch.tensor(self.action_scale) + self.action_bias #need detach?
-        log_prob = normal.log_prob(x_t)
+        action = y_t * torch.tensor(self.action_scale) + self.action_bias
 
-        log_prob -= torch.log(torch.tensor(self.action_scale) * (1-y_t.pow(20) + epsilon)) #added casting to action_scale to tensor
-        #print("log_prob: ", log_prob)
-        #log_prob = log_prob.sum(1, keepdim=True)
-        mean = torch.tanh(mean) * torch.tensor(self.action_scale) + self.action_bias #need detach here too?
+        log_prob = normal.log_prob(x_t).sum(axis=-1)
+
+
+
+        log_prob -= (2 * (np.log(2) - x_t - F.softplus(-2 * x_t))).sum(1)
+
+        mean = torch.tanh(mean) * torch.tensor(self.action_scale) + self.action_bias
         return action, log_prob, mean
 
 class CriticNetwork(nn.Module):
@@ -109,13 +109,11 @@ class CriticNetwork(nn.Module):
         return torch.squeeze(self.fc(torch.cat([state, action], 1)), -1)
 
 class SAC: #fixed entropy regularization
-    def __init__(self, num_inputs, num_actions, action_space, hidden_dim = 128, batch_size = 64, policy_epochs = 8,
-                 entropy_coef=0.001, gamma=0.99, tau = 0.001, alpha = 0.2):
-        #super().__init__(num_inputs, num_actions, hidden_dim, learning_rate, batch_size, policy_epochs, entropy_coef)
+    def __init__(self, num_inputs, num_actions, action_space, hidden_dim = 128, batch_size = 100, policy_epochs = 8,
+                 entropy_coef=0.001, gamma=0.99, tau = 0.005, alpha = 0.2):
         self.batch_size = batch_size
 
         self.actor = ActorNetwork(num_inputs, num_actions, hidden_dim, action_space)
-        self.actor_target = ActorNetwork(num_inputs, num_actions, hidden_dim, action_space)
 
         self.Q1 = CriticNetwork(num_inputs, num_actions, hidden_dim)
         self.Q2 = CriticNetwork(num_inputs, num_actions, hidden_dim)
@@ -127,94 +125,85 @@ class SAC: #fixed entropy regularization
         self.tau = tau
         self.alpha = alpha
 
-        for target_param, param in zip(self.actor_target.parameters(), self.actor.parameters()):
-            target_param.data.copy_(param.data)
-
         for target_param, param in zip(self.Q1_target.parameters(), self.Q1.parameters()):
             target_param.data.copy_(param.data)
 
         for target_param, param in zip(self.Q2_target.parameters(), self.Q2.parameters()):
             target_param.data.copy_(param.data)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-4)
-        self.Q1_optimizer = optim.Adam(self.Q1.parameters(), lr=1e-5)
-        self.Q2_optimizer = optim.Adam(self.Q2.parameters(), lr=1e-5)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=1e-3)
+        self.Q1_optimizer = optim.Adam(self.Q1.parameters(), lr=1e-3)
+        self.Q2_optimizer = optim.Adam(self.Q2.parameters(), lr=1e-3)
 
     def act(self, obs):
-        # state = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
-        # action = self.actor.forward(state)
-        # action = action.squeeze(0).cpu().detach().numpy()
-
-
-        #obs = Variable(torch.from_numpy(obs).float().unsqueeze(0))
         action, _, _ = self.actor.sample(obs)
-        #print("action actor returns: ", action)
-        #action = action.detach().numpy()[0,0]
-        action = action.detach().numpy() #TODO??? remove [0]
-        #print("action after detach numpy and[0]: ", action)
+        action = action.detach().numpy()[0]
         return action
 
     def update(self, rollouts, train_iter):
-        #for epoch in range(self.policy_epochs):
         data = rollouts.batch_sampler(self.batch_size, get_old_log_probs=False)
 
 
         _, done_batch, actions_batch, returns_batch, prev_obs_batch, obs_batch = data
 
+        # self.Q1_optimizer.zero_grad()
+        # self.Q2_optimizer.zero_grad()
+
+
+        # Q1 = self.Q1(prev_obs_batch, actions_batch)
+        # Q2 = self.Q2(prev_obs_batch, actions_batch)
+
         with torch.no_grad():
-            next_state_action, next_state_log_pi, _ = self.actor.sample(obs_batch) #WE USE ACTOR, NOT ACTOR TARGET!
+            next_state_action, next_state_log_pi, _ = self.actor.sample(obs_batch) #actor, not actor taret
             Q1_next_target = self.Q1_target(obs_batch, next_state_action)
             Q2_next_target = self.Q2_target(obs_batch, next_state_action)
-            print('Q1_next_target.shape: ', Q1_next_target.shape)
-            print('next_state_log_pi.shape: ', next_state_log_pi.shape)
-            min_next_target = torch.min(Q1_next_target, Q2_next_target) - self.alpha * next_state_log_pi.view(-1) #How do I get this log pi? What information does this log pi give us?
-            print('min_next_target.shape: ', min_next_target.shape)
-            print('returns_batch.shape: ', returns_batch.shape)
-            print('done_batch.shape: ', done_batch.shape)
+            # print('Q1_next_target.shape: ', Q1_next_target.shape)
+            # print('next_state_log_pi.shape: ', next_state_log_pi.shape)
+            min_next_target = torch.min(Q1_next_target, Q2_next_target) - self.alpha * next_state_log_pi
+            # print('min_next_target.shape: ', min_next_target.shape)
+            # print('returns_batch.shape: ', returns_batch.shape)
+            # print('done_batch.shape: ', done_batch.shape)
             next_Qvalue = returns_batch + (1-done_batch) * self.gamma * min_next_target
-            print('next_QValue.shape: ', next_Qvalue.shape)
+            # print('next_QValue.shape: ', next_Qvalue.shape)
+
 
         Q1 = self.Q1(prev_obs_batch, actions_batch)
         Q2 = self.Q2(prev_obs_batch, actions_batch)
-        print('Q1.shape: ', Q1.shape)
-        print('Q2.shape: ', Q2.shape)
-        Q1_loss = self.critic_criterion(Q1, next_Qvalue)
+
+
+        Q1_loss = nn.MSELoss()(Q1, next_Qvalue.detach())
+
+        # Q1_loss = 0.5 * (Q1 - next_Qvalue).pow(2).mean()
+
+        self.Q1_optimizer.zero_grad()
+        Q1_loss.backward()
+        self.Q1_optimizer.step()
+
         Q2_loss = self.critic_criterion(Q2, next_Qvalue)
+
+        self.Q2_optimizer.zero_grad()
+        Q2_loss.backward()
+        self.Q2_optimizer.step()
 
         pi, log_pi, _ = self.actor.sample(prev_obs_batch)
 
         Q1_pi = self.Q1(prev_obs_batch, pi)
         Q2_pi = self.Q2(prev_obs_batch, pi)
 
-        # Q1_loss = self.critic_criterion(Q1_pi, next_Qvalue)
-        # Q2_loss = self.critic_criterion(Q2_pi, next_Qvalue)
-
+        # temp = torch.min(Q1_pi, Q2_pi)
         policy_loss = -(torch.min(Q1_pi, Q2_pi) - self.alpha * log_pi).mean()
 
-
-        #print("Q1_loss: ", Q1_loss)
-        self.Q1_optimizer.zero_grad()
-        Q1_loss.backward(retain_graph=True)#need retain graph? retain_graph=True
-        self.Q1_optimizer.step()
-        # writer.add_scalar('Q1Loss/train', Q1_loss, train_iter)
-
-        self.Q2_optimizer.zero_grad()
-        Q2_loss.backward(retain_graph=True) #retain_graph=True
-        self.Q2_optimizer.step()
-
-        # writer.add_scalar('Q2Loss/train', Q2_loss, train_iter)
-
-        q_params = itertools.chain(self.Q1.parameters(), self.Q2.parameters())
-
-        for p in q_params:
-            p.requires_grad = False
+        # for p in q_params:
+        #     p.requires_grad = False
 
         self.actor_optimizer.zero_grad()
         policy_loss.backward()
         self.actor_optimizer.step()
 
-        for p in q_params:
-            p.requires_grad = True
+        # for p in q_params:
+        #     p.requires_grad = True
+
+        wandb.log({'Q1Loss': Q1_loss, 'Q2Loss':Q2_loss, 'PolicyLoss':policy_loss, 'train_iter': train_iter})
 
 
         # writer.add_scalar('PolicyLoss/train', policy_loss, train_iter)
@@ -227,8 +216,7 @@ class SAC: #fixed entropy regularization
 
 def train():
 
-    #env = gym.make('HalfCheetah-v2')
-    env = gym.make('MountainCarContinuous-v0')
+    env = gym.make('HalfCheetah-v2')
     obs_size = env.observation_space.shape[0]
     num_actions = env.action_space.shape[0]
     rollouts = RolloutStorage(obs_size)
@@ -239,53 +227,42 @@ def train():
     env.seed(234)
     random.seed(234)
 
-    policy = SAC(obs_size, num_actions, env.action_space) #can add  env.action_space if you want to scale by max environment action value
+    policy = SAC(obs_size, num_actions, env.action_space)
 
+    o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
+    for i in range(400000): #60000
 
+        print(i, ' transitions')
 
-    done = False;
-    prev_obs = env.reset()
-    prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
-    eps_reward = 0.
-    run = 0
-    episode_steps = 0
-    for j in range(60000):
+        a = policy.act(torch.tensor(o, dtype=torch.float32).unsqueeze(0))
 
-        print("j: ", j)
-        if done:
-
-            writer.add_scalar('TotalRewardPerEpisode/train', eps_reward, run)
-
-            run+=1
-
-
-            # Reset Environment
-            done = False
-            prev_obs = env.reset()
-            prev_obs = torch.tensor(prev_obs, dtype=torch.float32)
-            obs = env.reset()
-            obs = torch.tensor(obs, dtype=torch.float32)
-            eps_reward = 0.
-            episode_steps = 0
-        else:
-            obs = prev_obs
         env.render()
-        action = policy.act(obs)
-        #print("action: ", action)
-        obs, reward, done, info = env.step(action) #action.item()
-        #print('obs type: ', type(obs))
+        o2, r, d, _ = env.step(a)
+        ep_ret += r
+        ep_len += 1
 
-        episode_steps += 1
+        d = False if ep_len == 1000 else d
 
-        done = torch.tensor(done, dtype=torch.float32)
-        reward = torch.tensor(reward, dtype=torch.float32)
-        reward = reward
-        rollouts.insert((j, done, action, reward, prev_obs.numpy(), obs)) #obs is numpy array
+        rollouts.insert((i, d, a, r, o, o2))
 
-        prev_obs = torch.tensor(obs, dtype=torch.float32)
-        eps_reward += reward
-        if len(rollouts.buffer) >= 64:
-            policy.update(rollouts, j)
+        o = o2
+
+        if d or (ep_len == 1000):
+            wandb.log({'TotalRewardPerEpisode': ep_ret, 'episode_step': run})
+            run += 1
+            o, ep_ret, ep_len = env.reset(), 0, 0
+
+        if len(rollouts.buffer) >= 100:
+            policy.update(rollouts, i)
+
+    env.close()
+
+    if not os.path.isdir('model'):
+        os.makedirs('model')
+
+    torch.save(policy.actor.state_dict(), 'model/actor_param')
+
+
 
 
 if __name__ == "__main__":
