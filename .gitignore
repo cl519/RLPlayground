@@ -4,3 +4,4 @@ env/
 DDPG-old/
 .idea
 model/
+wandb/

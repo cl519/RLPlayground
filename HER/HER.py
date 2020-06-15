@@ -1,3 +1,4 @@
+import argparse
 import random
 import os
 
@@ -32,20 +33,21 @@ class RolloutStorage():
 
     def insert(self, transition):
         self.buffer.append(transition)
-    def batch_sampler(self, batch_size = 200, get_old_log_probs=False):
+    def batch_sampler(self, batch_size = 200):
 
         mini_batch = random.sample(self.buffer, batch_size)
-        step_list, done_list, action_list, reward_list, prev_obs_list, obs_list = [], [], [], [], [], []
+        done_list, action_list, reward_list, prev_obs_list, obs_list = [], [], [], [], [] #step_list
+
+        # print(mini_batch)
 
         for transition in mini_batch:
-            s, d, a, r, po, o = transition
-            step_list.append(s)
+            d, a, r, po, o = transition
             done_list.append(d)
             action_list.append(a)
             reward_list.append(r)
             prev_obs_list.append(po)
             obs_list.append(o)
-        return torch.tensor(step_list, dtype=torch.float), torch.tensor(done_list, dtype=torch.float), \
+        return torch.tensor(done_list, dtype=torch.float), \
                    torch.tensor(action_list, dtype=torch.float), torch.tensor(reward_list, dtype=torch.float), \
                    torch.tensor(prev_obs_list, dtype=torch.float), torch.tensor(obs_list, dtype=torch.float)
 
@@ -135,16 +137,18 @@ class SAC: #fixed entropy regularization
         self.Q1_optimizer = optim.Adam(self.Q1.parameters(), lr=1e-4)
         self.Q2_optimizer = optim.Adam(self.Q2.parameters(), lr=1e-4)
 
-    def act(self, obs):
-        action, _, _ = self.actor.sample(obs)
-        action = action.detach().numpy()[0]
-        return action
+    def act(self, obs, evaluation=False):
+        if evaluation is False:
+            action, _, _ = self.actor.sample(obs)
+        else:
+            _, _, action = self.actor.sample(obs)
+        return action.detach().numpy()[0]
 
     def update(self, rollouts, train_iter):
-        data = rollouts.batch_sampler(self.batch_size, get_old_log_probs=False)
+        data = rollouts.batch_sampler(self.batch_size)
 
 
-        _, done_batch, actions_batch, returns_batch, prev_obs_batch, obs_batch = data
+        done_batch, actions_batch, returns_batch, prev_obs_batch, obs_batch = data
 
         # self.Q1_optimizer.zero_grad()
         # self.Q2_optimizer.zero_grad()
@@ -216,8 +220,11 @@ class SAC: #fixed entropy regularization
 
 def train():
 
-    env = gym.make('HalfCheetah-v2')
-    obs_size = env.observation_space.shape[0]
+    env = gym.make('FetchReach-v1') #max_ep_len is 50
+    print('env observation space: ', env.observation_space)
+    print('env action space: ', env.action_space)
+    obs_size = env.observation_space['observation'].shape[0]
+    goal_size = env.observation_space['desired_goal'].shape[0]
     num_actions = env.action_space.shape[0]
     rollouts = RolloutStorage(obs_size)
 
@@ -227,43 +234,111 @@ def train():
     env.seed(234)
     random.seed(234)
 
-    policy = SAC(obs_size, num_actions, env.action_space)
+    # print('env.action_space sample: ', env.action_space.sample())
+    # print('env.observation_space sample: ', env.observation_space.sample())
+
+    policy = SAC(obs_size + goal_size, num_actions, env.action_space)
 
     o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
-    for i in range(400000): #60000
+    d = False
+    for i in range(400): #400 episodes
 
-        print(i, ' transitions')
+        print(i, ' episodes')
 
-        a = policy.act(torch.tensor(o, dtype=torch.float32).unsqueeze(0))
+        desired_goal = o['desired_goal']
+        traj = []
+        while not d:
+            a = policy.act(torch.tensor(np.concatenate((o['observation'], desired_goal)), dtype=torch.float32).unsqueeze(0))
+            # a = env.action_space.sample() #append with desired goal
 
-        env.render()
-        o2, r, d, _ = env.step(a)
-        ep_ret += r
-        ep_len += 1
+            env.render()
+            o2, r, d, _ = env.step(a)
+            ep_ret += r
+            ep_len += 1
 
-        d = False if ep_len == 1000 else d
+            d = False if ep_len == 50 else d #1000
 
-        rollouts.insert((i, d, a, r, o, o2))
+            ag = o2['achieved_goal']
+            traj.append((d, a, r, o, o2, ag))
 
-        o = o2
+            rollouts.insert((d, a, r, np.concatenate((o['observation'], desired_goal)), np.concatenate((o2['observation'], desired_goal))))
 
-        if d or (ep_len == 1000):
-            wandb.log({'TotalRewardPerEpisode': ep_ret, 'episode_step': run})
-            run += 1
-            o, ep_ret, ep_len = env.reset(), 0, 0
+            if d or (ep_len == 50):
+                wandb.log({'TotalRewardPerEpisode': ep_ret, 'episode_step': run})
+                run += 1
+                break
+
+            o = o2
+
+        substitute_goal = o['achieved_goal']
+        for transition in traj:
+            d, a, r, o, o2, ag = transition
+            substitute_reward = env.compute_reward(ag, substitute_goal, _)
+            rollouts.insert((d, a, substitute_reward, np.concatenate((o['observation'], substitute_goal)), np.concatenate((o2['observation'], substitute_goal))))
 
         if len(rollouts.buffer) >= 100:
-            policy.update(rollouts, i)
+            for t in range(50):
+                policy.update(rollouts, i)
+
+        o, ep_ret, ep_len, d = env.reset(), 0, 0, False
+        # if d or (ep_len == 1000):
+        #     # wandb.log({'TotalRewardPerEpisode': ep_ret, 'episode_step': run})
+        #     run += 1
+        #     o, ep_ret, ep_len = env.reset(), 0, 0
+        #
 
     env.close()
 
-    if not os.path.isdir('model'):
-        os.makedirs('model')
+    # if not os.path.isdir('model'):
+    #     os.makedirs('model')
+    #
+    # torch.save(policy.actor.state_dict(), 'model/actor_param')
 
-    torch.save(policy.actor.state_dict(), 'model/actor_param')
+def test():
+    env = gym.make('HalfCheetah-v2')
+    obs_size = env.observation_space.shape[0]
+    num_actions = env.action_space.shape[0]
+    hidden_dim = 128
 
 
+    policy = SAC(obs_size, num_actions, env.action_space)
+
+    policy.actor = ActorNetwork(obs_size, num_actions, hidden_dim, env.action_space)
+
+    policy.actor.load_state_dict(torch.load('model/actor_param'))
+
+    np.random.seed(345)
+    torch.manual_seed(345)
+    env.seed(345)
+    random.seed(345)
+
+    o, ep_ret, run, ep_len = env.reset(), 0, 0, 0
+
+    for i in range(10):
+        print(i, ' runs')
+        d = False
+        while not d or (ep_len == 1000):
+            a = policy.act(torch.tensor(o, dtype=torch.float32).unsqueeze(0), True)
+            env.render()
+            o2, r, d, _ = env.step(a)
+            ep_ret += r
+            ep_len += 1
+
+            o = o2
+            if d:
+                # wandb.log({'TotalRewardPerEpisode/test': ep_ret})
+                run += 1
+                o, ep_ret, ep_len = env.reset(), 0, 0
+    env.close()
 
 
 if __name__ == "__main__":
-    train()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', type=str, default='train')
+    args = parser.parse_args()
+    mode = args.mode
+
+    if mode == 'train':
+        train()
+    elif mode == 'test':
+        test()
