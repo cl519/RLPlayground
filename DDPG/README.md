@@ -8,6 +8,12 @@ DDPG is an actor-critic, model-free algorithm based on the deterministic policy 
 <img src="figures/policygoal.png"/>. 
 For this implementation, time-correlated OU-noise, suggested by the original paper, is used to encourage exploration.
 
+The algorithm goes as follows:
+
+<img src="figures/algorithm.png" height="400"/>. 
+
+
+
 ## Create the environment
 * Create a virtual environment with python 3+
 

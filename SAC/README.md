@@ -5,6 +5,11 @@ This is a pytorch implementation of [**Soft Actor-Critic**](https://arxiv.org/pd
 
 SAC is an off-policy actor-critic deep RL algorithm based on the maximum entropy reinforcement learning framework. The actor has to maximize the trade-off between expected reward and entropy, a measure of randomness in the policy. By including entropy regoularization, the model learns to succeed at the task and also learns to act randomly. Similar to TD3(Twin Delayed DDPG), SAC learns two Q-functions. Those two Q-functions regress to a single shared target, which is computed using target Q-networks. Target Q-networks are obtained by polyak averaging the Q-networks parameters over the course of training. The Q-value used for policy optimization is the smaller of the two Q approximators. For this implementation, fixed entropy reguluarization entropy coefficient is used. There is also a variant of SAC that varies the coefficient over the course of training. 
 
+The algorithm goes as follows:
+
+<img src="figures/algorithm.png" height="400"/>. 
+
+
 ## Create the environment (NOTE TO SELF: still need requirements.txt)
 * Create a virtual environment with python 3+
 
@@ -65,6 +70,13 @@ tensorboard --logdir=runs
 
 ## Evaluation
 
-In construction
+* Reward per episode
+
+<img src="figures/evaluation.png" height="400"/>
+
+* Visualization should look similar to the following
+
+[![Demo alpha](https://imgflip.com/gif/45m3by)](https://www.youtube.com/watch?v=9jJEE4BMwLM)
+
 
 
