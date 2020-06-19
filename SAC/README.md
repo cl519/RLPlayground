@@ -10,7 +10,7 @@ The algorithm goes as follows:
 <img src="figures/algorithm.png" height="800"/>. 
 
 
-## Create the environment (NOTE TO SELF: still need requirements.txt)
+## Create the environment
 * Create a virtual environment with python 3+
 
 On macOS and Linux:
@@ -74,9 +74,9 @@ tensorboard --logdir=runs
 
 <img src="figures/evaluation.png" height="400"/>
 
-* Visualization should look similar to the following
+* Visualization
 
-[![Demo alpha](https://imgflip.com/gif/45m3by)](https://www.youtube.com/watch?v=9jJEE4BMwLM)
+[![Demo alpha](https://j.gifs.com/MwPjyB.gif)](https://www.youtube.com/watch?v=9jJEE4BMwLM)
 
 
 
