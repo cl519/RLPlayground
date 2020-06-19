@@ -7,7 +7,7 @@ SAC is an off-policy actor-critic deep RL algorithm based on the maximum entropy
 
 The algorithm goes as follows:
 
-<img src="figures/algorithm.png" height="400"/>. 
+<img src="figures/algorithm.png" height="800"/>. 
 
 
 ## Create the environment (NOTE TO SELF: still need requirements.txt)
