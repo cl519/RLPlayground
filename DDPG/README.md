@@ -10,7 +10,7 @@ For this implementation, time-correlated OU-noise, suggested by the original pap
 
 The algorithm goes as follows:
 
-<img src="figures/algorithm.png" height="400"/>. 
+<img src="figures/algorithm.png" height="800"/>. 
 
 
 
