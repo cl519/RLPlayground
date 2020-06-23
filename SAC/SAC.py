@@ -26,30 +26,6 @@ from gym import spaces, logger
 from gym.utils import seeding
 import numpy as np
 
-# class RolloutStorage():
-#     def __init__(self, obs_size, BUFFER_LIMIT = int(1e6)): #used to be 1000000 #8000
-#         self.buffer = collections.deque(maxlen = BUFFER_LIMIT)
-#         self.obs_size = obs_size
-#
-#     def insert(self, transition):
-#         self.buffer.append(transition)
-#     def batch_sampler(self, batch_size = 200, get_old_log_probs=False):
-#
-#         mini_batch = random.sample(self.buffer, batch_size)
-#         step_list, done_list, action_list, reward_list, prev_obs_list, obs_list = [], [], [], [], [], []
-#
-#         for transition in mini_batch:
-#             s, d, a, r, po, o = transition
-#             step_list.append(s)
-#             done_list.append(d)
-#             action_list.append(a)
-#             reward_list.append(r)
-#             prev_obs_list.append(po)
-#             obs_list.append(o)
-#         return torch.tensor(step_list, dtype=torch.float), torch.tensor(done_list, dtype=torch.float), \
-#                    torch.tensor(action_list, dtype=torch.float), torch.tensor(reward_list, dtype=torch.float), \
-#                    torch.tensor(prev_obs_list, dtype=torch.float), torch.tensor(obs_list, dtype=torch.float)
-
 class RolloutStorage():
     def __init__(self, obs_size, BUFFER_LIMIT = int(1e6)): #used to be 1000000 #8000
         self.buffer = collections.deque(maxlen = BUFFER_LIMIT)
@@ -61,8 +37,6 @@ class RolloutStorage():
 
         mini_batch = random.sample(self.buffer, batch_size)
         done_list, action_list, reward_list, prev_obs_list, obs_list = [], [], [], [], [] #step_list
-
-        # print(mini_batch)
 
         for transition in mini_batch:
             d, a, r, po, o = transition
@@ -80,9 +54,6 @@ class RolloutStorage():
 class ActorNetwork(nn.Module):
     def __init__(self, num_inputs, num_actions, hidden_dim, action_space):
         super().__init__()
-        # print("num_inputs type: ", type(num_inputs))
-        # print("num_actions type: ", type(num_actions))
-        # print("hidden_dim type: ", type(hidden_dim))
         self.action_scale = action_space.high
         self.action_bias = 0
         self.fc = nn.Sequential(
@@ -95,6 +66,7 @@ class ActorNetwork(nn.Module):
         self.mean_linear = nn.Linear(hidden_dim, num_actions)
         self.log_std_linear = nn.Linear(hidden_dim, num_actions)
 
+    # The function outputs mean and log_std by feeding state through the actor network which the first two layers are shared
     def forward(self, state):
         x = self.fc(state)
         mean = self.mean_linear(x)
@@ -102,6 +74,9 @@ class ActorNetwork(nn.Module):
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max = LOG_SIG_MAX)
         return mean, log_std
 
+    # The function obtains mean and log_std by calling forward, and then builds a distribution by using mean and log_std, and then samples from it
+    # Another way to do this is to cover test-time action is to have flags that 1. simply use mean for x_t 2. make log_prob 0 (probably unecessary
+    # because we don't need that information anyways)
     def sample(self, state):
         mean, log_std = self.forward(state)
         std = log_std.exp()
@@ -112,8 +87,7 @@ class ActorNetwork(nn.Module):
 
         log_prob = normal.log_prob(x_t).sum(axis=-1)
 
-
-
+        # This is a correction formula referred from: https://github.com/openai/spinningup/blob/master/spinup/algos/pytorch/sac/core.py
         log_prob -= (2 * (np.log(2) - x_t - F.softplus(-2 * x_t))).sum(1)
 
         mean = torch.tanh(mean) * torch.tensor(self.action_scale) + self.action_bias
@@ -182,23 +156,14 @@ class SAC: #fixed entropy regularization
             next_state_action, next_state_log_pi, _ = self.actor.sample(obs_batch) #actor, not actor taret
             Q1_next_target = self.Q1_target(obs_batch, next_state_action)
             Q2_next_target = self.Q2_target(obs_batch, next_state_action)
-            # print('Q1_next_target.shape: ', Q1_next_target.shape)
-            # print('next_state_log_pi.shape: ', next_state_log_pi.shape)
             min_next_target = torch.min(Q1_next_target, Q2_next_target) - self.alpha * next_state_log_pi
-            # print('min_next_target.shape: ', min_next_target.shape)
-            # print('returns_batch.shape: ', returns_batch.shape)
-            # print('done_batch.shape: ', done_batch.shape)
             next_Qvalue = returns_batch + (1-done_batch) * self.gamma * min_next_target
-            # print('next_QValue.shape: ', next_Qvalue.shape)
-
 
         Q1 = self.Q1(prev_obs_batch, actions_batch)
         Q2 = self.Q2(prev_obs_batch, actions_batch)
 
 
         Q1_loss = nn.MSELoss()(Q1, next_Qvalue.detach())
-
-        # Q1_loss = 0.5 * (Q1 - next_Qvalue).pow(2).mean()
 
         self.Q1_optimizer.zero_grad()
         Q1_loss.backward()
