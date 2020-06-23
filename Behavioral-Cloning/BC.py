@@ -72,11 +72,8 @@ class Policy():
     def update(self, expert_state_batch, expert_action_batch, iter_num):
 
         self.optimizer.zero_grad()
+        # "outputs" is logits
         outputs, _ = self.net(torch.tensor(expert_state_batch, dtype=torch.float32))
-
-        # expert_action_batch = expert_action_batch.reshape(10, 1)
-        # print('expert_action_batch: ', expert_action_batch)
-        # print('outputs: ', outputs)
 
         loss = self.criterion(outputs, torch.tensor(expert_action_batch, dtype=torch.long))
         print("loss: ", loss)
@@ -95,12 +92,8 @@ def train(opts):
 
 
     env = gym.make('MountainCar-v0')
-    # print('env.action_space: ', env.action_space)
-    # print('env.action_space.shape: ', env.action_space.shape)
     num_inputs = env.observation_space.shape[0]
     num_actions = env.action_space.n
-    # print('num_inputs: ', num_inputs)
-    # print('num_actions: ', num_actions)
 
     policy = Policy(num_inputs, num_actions)
 
@@ -112,11 +105,7 @@ def train(opts):
     for _ in range(num_epoch):
         for _ in range(num_batch):
             batch_index = np.random.choice(len(expert_state), 64)
-            # print('batch_index: ', batch_index)
             expert_state_batch, expert_action_batch = expert_state[batch_index], expert_action[batch_index]
-
-            # print('expert_state_batch: ', expert_state_batch)
-            # print('expert_action_batch: ', expert_action_batch)
 
 
             policy.update(expert_state_batch, expert_action_batch, iter_num)
