@@ -54,7 +54,7 @@ tensorboard-plugin-wit==1.6.0.post3
 tensorboardX==2.0
 torch==1.5.0
 torchvision==0.6.0
-urllib3==1.25.9
+urllib3==1.26.5
 wandb==0.8.36
 watchdog==0.10.2
 Werkzeug==1.0.1
